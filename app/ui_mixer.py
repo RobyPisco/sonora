@@ -429,6 +429,10 @@ class MixerTab(QWidget):
         self._xform_cache: dict[tuple[float, int], object] = {}
         self._loop_a: float | None = None
         self._loop_b: float | None = None
+        # zoom waveform: finestra di vista globale [start, end] condivisa fra le tracce
+        self._view: list[float] = [0.0, 1.0]
+        # beat grid: frazioni dei beat correnti (per mostrarle/nasconderle)
+        self._beat_fracs: list[float] = []
         # loop progressivo (auto-incremento velocità)
         self._autospeed_on = False
         self._autospeed_start = 60   # %
@@ -648,6 +652,25 @@ class MixerTab(QWidget):
             "Loop progressivo: parte lento e accelera ad ogni giro fino a 100%.\n"
             "Clicca per configurare e attivare.")
         self.autospeed_btn.clicked.connect(self._show_autospeed)
+        # zoom waveform (vista condivisa fra le tracce)
+        self.zoomout_btn = QPushButton("–")
+        self.zoomin_btn = QPushButton("+")
+        self.zoomfit_btn = QPushButton("⤢")
+        for b in (self.zoomout_btn, self.zoomin_btn, self.zoomfit_btn):
+            b.setObjectName("GhostMini"); b.setFixedWidth(32)
+        self.zoomout_btn.setToolTip("Zoom indietro (anche Ctrl+rotella sulla traccia)")
+        self.zoomin_btn.setToolTip("Zoom avanti (anche Ctrl+rotella sulla traccia)")
+        self.zoomfit_btn.setToolTip("Adatta: mostra tutto il brano")
+        self.zoomin_btn.clicked.connect(lambda: self._zoom_at(2, None))
+        self.zoomout_btn.clicked.connect(lambda: self._zoom_at(-2, None))
+        self.zoomfit_btn.clicked.connect(self._zoom_reset)
+        # toggle griglia beat sulle waveform (default acceso)
+        self.beatgrid_btn = QPushButton("Griglia"); self.beatgrid_btn.setCheckable(True)
+        self.beatgrid_btn.setObjectName("GhostMini"); self.beatgrid_btn.setFixedWidth(64)
+        self.beatgrid_btn.setChecked(True)
+        self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;")
+        self.beatgrid_btn.setToolTip("Mostra/nascondi la griglia dei beat sulle waveform.")
+        self.beatgrid_btn.toggled.connect(self._on_beatgrid_toggle)
         # metronomo
         self.click_btn = QPushButton("Click"); self.click_btn.setCheckable(True)
         self.click_btn.setObjectName("GhostMini"); self.click_btn.setFixedWidth(66)
@@ -677,6 +700,11 @@ class MixerTab(QWidget):
         loop_hint.setToolTip("Tieni premuto Ctrl (o Shift) e trascina sulla waveform "
                              "per selezionare la regione da ripetere.")
         ctrl.addWidget(loop_hint)
+        ctrl.addSpacing(12)
+        zoom_lbl = QLabel("Zoom"); zoom_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        ctrl.addWidget(zoom_lbl)
+        ctrl.addWidget(self.zoomout_btn); ctrl.addWidget(self.zoomin_btn); ctrl.addWidget(self.zoomfit_btn)
+        ctrl.addWidget(self.beatgrid_btn)
         ctrl.addStretch(1)
         ctrl.addWidget(self.click_btn); ctrl.addWidget(self.steady_btn)
         ctrl.addWidget(self.click_vol)
@@ -758,6 +786,7 @@ class MixerTab(QWidget):
         self.engine.load_files(files)
         self._folder = folder
         self.title_lbl.setText(os.path.basename(folder))
+        self._view = [0.0, 1.0]   # nuovo brano: zoom azzerato
         self._build_strips(files)
         self._set_loaded(True)
         self.analyze_btn.setEnabled(True)
@@ -778,12 +807,17 @@ class MixerTab(QWidget):
         self.click_btn.setChecked(False)
         self.click_btn.setEnabled(False)
 
-        # analisi: carica cache o invita ad analizzare
+        # analisi: usa la cache se c'è, altrimenti analizza subito da solo
         data = stems.load_analysis(folder)
         if data:
             self._apply_analysis(data)
         else:
             self._clear_analysis()
+            # auto-analisi in background se il motore è pronto. Silenzioso:
+            # niente popup qui (a differenza del click manuale su "Analizza");
+            # _on_analyze gestisce già il caso di un'analisi già in corso.
+            if stems.engine_ready():
+                self._on_analyze()
 
         # ripristina la sessione mixer salvata (fader/pan/mute/solo/velocità/tono)
         self._load_session()
@@ -813,8 +847,61 @@ class MixerTab(QWidget):
             strip.wave.set_peaks(mn, mx)
             strip.wave.seeked.connect(self._on_wave_seek)
             strip.wave.loop_selected.connect(self._on_wave_loop)
+            strip.wave.wheel_zoom.connect(self._on_wheel_zoom)
+            strip.wave.wheel_pan.connect(self._on_wheel_pan)
+            strip.wave.set_view(self._view[0], self._view[1])
             self.strips_box.addWidget(strip)
             self.strips.append(strip)
+
+    # ---------- zoom waveform (vista condivisa fra le tracce) ----------
+
+    MIN_VIEW_SPAN = 0.02   # zoom massimo ~50x
+
+    def _apply_view(self) -> None:
+        for s in self.strips:
+            s.wave.set_view(self._view[0], self._view[1])
+
+    def _zoom_at(self, steps: int, center: float | None) -> None:
+        """Zoom tenendo fisso `center` (frazione globale); None = centro vista."""
+        s, e = self._view
+        span = e - s
+        if span <= 0:
+            return
+        if center is None:
+            center = s + span / 2.0
+        new_span = max(self.MIN_VIEW_SPAN, min(1.0, span * (0.8 ** steps)))
+        ns = center - (center - s) * (new_span / span)
+        ne = ns + new_span
+        if ns < 0.0:
+            ns, ne = 0.0, new_span
+        if ne > 1.0:
+            ne, ns = 1.0, 1.0 - new_span
+        self._view = [max(0.0, ns), min(1.0, ne)]
+        self._apply_view()
+
+    def _zoom_reset(self) -> None:
+        self._view = [0.0, 1.0]
+        self._apply_view()
+
+    def _on_wheel_zoom(self, steps: int, center: float) -> None:
+        self._zoom_at(steps, center)
+
+    def _on_wheel_pan(self, steps: int) -> None:
+        s, e = self._view
+        span = e - s
+        if span >= 1.0:
+            return
+        delta = steps * span * 0.15
+        delta = max(delta, -s)            # non oltre il bordo sinistro
+        delta = min(delta, 1.0 - e)       # né oltre il destro
+        self._view = [s + delta, e + delta]
+        self._apply_view()
+
+    def _on_beatgrid_toggle(self, on: bool) -> None:
+        self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;" if on else "")
+        fr = self._beat_fracs if on else []
+        for s in getattr(self, "strips", []):
+            s.wave.set_beats(fr)
 
     # ---------- analisi ----------
 
@@ -833,6 +920,7 @@ class MixerTab(QWidget):
         self._sec_duration = 0.0
         self._build_sections()
         self._update_section_markers()
+        self._beat_fracs = []
         for s in getattr(self, "strips", []):
             s.wave.set_beats([])
 
@@ -855,11 +943,12 @@ class MixerTab(QWidget):
         self.engine.set_beats(beats)
         self.click_btn.setEnabled(bool(beats))
         self.click_btn.setToolTip("" if beats else "Ri-analizza per abilitare il metronomo.")
-        # beat grid sulle waveform
+        # beat grid sulle waveform (rispetta il toggle Griglia)
         dur = float(d.get("duration") or self.engine.duration() or 0.0)
-        beat_fracs = [t / dur for t in beats if dur > 0 and 0.0 < t < dur]
+        self._beat_fracs = [t / dur for t in beats if dur > 0 and 0.0 < t < dur]
+        show = self._beat_fracs if self.beatgrid_btn.isChecked() else []
         for s in getattr(self, "strips", []):
-            s.wave.set_beats(beat_fracs)
+            s.wave.set_beats(show)
         # accordi rilevati
         self._chords = [c for c in (d.get("chords") or []) if isinstance(c, dict)]
         self._chord_times = [float(c.get("time", 0.0)) for c in self._chords]
@@ -1386,6 +1475,14 @@ class MixerTab(QWidget):
             any_solo = any(st.s_btn.isChecked() for st in self.strips)
             audible = s.s_btn.isChecked() if any_solo else not s.m_btn.isChecked()
             s.wave.set_dim(not audible)
+        # auto-scroll della vista zoomata: segue il playhead in riproduzione
+        vs, ve = self._view
+        span = ve - vs
+        if span < 1.0 and self.engine.is_playing() and (frac < vs or frac > ve - span * 0.1):
+            ns = min(max(0.0, frac - span * 0.15), 1.0 - span)
+            if abs(ns - vs) > 1e-4:
+                self._view = [ns, ns + span]
+                self._apply_view()
         if dur:
             self.time_lbl.setText(f"{_fmt_time(pos)} / {_fmt_time(dur)}")
         self._refresh_chords()

@@ -26,8 +26,10 @@ def compute_peaks(mono: np.ndarray, columns: int) -> tuple[np.ndarray, np.ndarra
 class WaveformWidget(QWidget):
     """Disegna la waveform di una traccia con playhead. Click/drag → seek (frazione)."""
 
-    seeked = Signal(float)          # 0..1
+    seeked = Signal(float)          # 0..1 (frazione globale)
     loop_selected = Signal(float, float)   # (a_frac, b_frac) ordinati, da Shift+trascina
+    wheel_zoom = Signal(int, float)        # (passi rotella, centro_frazione_globale)
+    wheel_pan = Signal(int)                # (passi rotella; >0 = verso destra)
 
     def __init__(self, color: str = "#ff3b5c"):
         super().__init__()
@@ -40,9 +42,13 @@ class WaveformWidget(QWidget):
         self._loop_drag = None  # frazione iniziale durante Shift+trascina, o None
         self._markers: list[float] = []   # confini di sezione (frazioni 0..1)
         self._beats: list[float] = []      # beat grid (frazioni 0..1)
+        # finestra di visualizzazione (zoom): porzione globale [start, end] visibile
+        self._view_start = 0.0
+        self._view_end = 1.0
         self.setMinimumHeight(56)
         self.setMouseTracking(True)
-        self.setToolTip("Click = vai al punto · Ctrl/Shift+trascina = seleziona il loop")
+        self.setToolTip("Click = vai al punto · Ctrl/Shift+trascina = loop\n"
+                        "Ctrl+rotella = zoom · Shift+rotella = scorri")
 
     def set_peaks(self, mins: np.ndarray, maxs: np.ndarray) -> None:
         self._mins, self._maxs = mins, maxs
@@ -77,9 +83,25 @@ class WaveformWidget(QWidget):
         self._beats = list(fracs or [])
         self.update()
 
+    def set_view(self, start: float, end: float) -> None:
+        """Imposta la porzione globale [start, end] visibile (zoom condiviso)."""
+        start = max(0.0, min(1.0, start))
+        end = max(start + 1e-4, min(1.0, end))
+        self._view_start, self._view_end = start, end
+        self.update()
+
+    def _span(self) -> float:
+        return max(self._view_end - self._view_start, 1e-9)
+
     def _frac(self, x: float) -> float:
+        """x locale (px) → frazione globale 0..1, tenendo conto dello zoom."""
         w = max(1, self.width())
-        return max(0.0, min(1.0, x / w))
+        gf = self._view_start + (x / w) * self._span()
+        return max(0.0, min(1.0, gf))
+
+    def _x_of(self, fr: float) -> int:
+        """Frazione globale 0..1 → x locale (px) nella vista corrente."""
+        return int((fr - self._view_start) / self._span() * self.width())
 
     def _emit_seek(self, x: float) -> None:
         self.seeked.emit(self._frac(x))
@@ -117,6 +139,7 @@ class WaveformWidget(QWidget):
         w, h = self.width(), self.height()
         mid = h / 2.0
         p.fillRect(self.rect(), QColor("#161922"))
+        vs, span = self._view_start, self._span()
 
         n = len(self._maxs)
         if n:
@@ -125,9 +148,9 @@ class WaveformWidget(QWidget):
                 col.setAlpha(70)
             p.setPen(QPen(col, 1))
             for x in range(w):
-                idx = int(x / w * n)
-                if idx >= n:
-                    idx = n - 1
+                # x → frazione globale (con zoom) → indice nei peak
+                idx = int((vs + (x / w) * span) * n)
+                idx = min(max(idx, 0), n - 1)
                 top = mid - self._maxs[idx] * (mid - 2)
                 bot = mid - self._mins[idx] * (mid - 2)
                 p.drawLine(x, int(top), x, int(bot))
@@ -136,13 +159,14 @@ class WaveformWidget(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 18), 1))
         p.drawLine(0, int(mid), w, int(mid))
 
-        # beat grid (linee verticali tenui); saltato se i beat sono troppo
-        # fitti per la larghezza attuale, così non diventano un muro grigio
-        if self._beats and w / len(self._beats) >= 5:
-            p.setPen(QPen(QColor(255, 255, 255, 24), 1))
-            for fr in self._beats:
-                if 0.0 < fr < 1.0:
-                    bx = int(fr * w)
+        # beat grid (linee verticali tenui); saltato se i beat visibili sono
+        # troppo fitti per la larghezza, così non diventano un muro grigio
+        if self._beats:
+            visible = [fr for fr in self._beats if vs < fr < self._view_end]
+            if visible and w / len(visible) >= 5:
+                p.setPen(QPen(QColor(255, 255, 255, 24), 1))
+                for fr in visible:
+                    bx = self._x_of(fr)
                     p.drawLine(bx, 0, bx, h)
 
         # marker di sezione (linee verticali tratteggiate)
@@ -150,22 +174,41 @@ class WaveformWidget(QWidget):
             pen = QPen(QColor(150, 160, 190, 120), 1, Qt.PenStyle.DashLine)
             p.setPen(pen)
             for fr in self._markers:
-                if 0.0 < fr < 1.0:
-                    mx = int(fr * w)
+                if vs < fr < self._view_end:
+                    mx = self._x_of(fr)
                     p.drawLine(mx, 0, mx, h)
 
         # regione loop A-B
         if self._loop is not None:
             a, b = self._loop
-            ax, bx = int(a * w), int(b * w)
+            ax = max(0, min(w, self._x_of(a)))
+            bx = max(0, min(w, self._x_of(b)))
             p.fillRect(QRectF(ax, 0, max(1, bx - ax), h), QColor(61, 220, 132, 30))
             p.setPen(QPen(QColor("#3ddc84"), 1))
             p.drawLine(ax, 0, ax, h)
             p.drawLine(bx, 0, bx, h)
 
         # playhead
-        px = int(self._progress * w)
-        p.setPen(QPen(QColor("#ffffff"), 1))
-        p.drawLine(px, 0, px, h)
-        p.fillRect(QRectF(0, 0, px, h), QColor(255, 255, 255, 12))
+        px = self._x_of(self._progress)
+        if 0 <= px <= w:
+            p.setPen(QPen(QColor("#ffffff"), 1))
+            p.drawLine(px, 0, px, h)
+        # ombreggiatura della parte già suonata (entro la vista)
+        fill_x = max(0, min(w, px))
+        p.fillRect(QRectF(0, 0, fill_x, h), QColor(255, 255, 255, 12))
         p.end()
+
+    def wheelEvent(self, e) -> None:  # noqa: N802
+        """Ctrl+rotella = zoom (centrato sul cursore); Shift+rotella = scorri.
+        Senza modificatori lascia passare l'evento (scroll verticale del mixer)."""
+        mods = e.modifiers()
+        steps = 1 if e.angleDelta().y() > 0 else -1
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            center = self._frac(e.position().x())
+            self.wheel_zoom.emit(steps, center)
+            e.accept()
+        elif mods & Qt.KeyboardModifier.ShiftModifier:
+            self.wheel_pan.emit(steps)
+            e.accept()
+        else:
+            e.ignore()

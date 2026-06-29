@@ -1,0 +1,29 @@
+# --- Build / distribuzione (rigenerabili) ---
+/build/
+/dist/
+/dist_installer/
+*.spec.bak
+
+# --- Binari di terze parti (scaricati a parte, troppo grossi per git) ---
+# ffmpeg.exe, ffprobe.exe, uv.exe — vedi README per come ottenerli
+/bin/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# --- Config / cache locali ---
+/.claude/
+*.log
+
+# --- Editor / OS ---
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QObject, QPoint, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPen, QPolygon, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollBar,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -213,6 +215,186 @@ def _card(title: str, value: str, color: str = "#e6e8ee") -> tuple[QFrame, QLabe
     lay.addWidget(t)
     lay.addWidget(v)
     return f, v
+
+
+class TimelineWidget(QWidget):
+    """Disegna la timeline con misure/beat (se disponibili dopo l'analisi)
+    o secondi (come fallback) allineata con le waveform.
+    """
+
+    seeked = Signal(float)          # 0..1 (frazione globale)
+
+    def __init__(self, engine: MixerEngine):
+        super().__init__()
+        self.engine = engine
+        self._view_start = 0.0
+        self._view_end = 1.0
+        self._beats = []
+        self._duration = 0.0
+        self._progress = 0.0
+        self.setFixedHeight(24)
+
+    def set_view(self, start: float, end: float) -> None:
+        self._view_start = start
+        self._view_end = end
+        self.update()
+
+    def set_progress(self, frac: float) -> None:
+        self._progress = frac
+        self.update()
+
+    def set_data(self, beats: list[float], duration: float) -> None:
+        self._beats = list(beats or [])
+        self._duration = duration
+        self.update()
+
+    def _span(self) -> float:
+        return max(self._view_end - self._view_start, 1e-9)
+
+    def _x_of(self, fr: float) -> int:
+        w = self.width()
+        w_timeline = w - 356
+        if w_timeline <= 0:
+            return 0
+        return int(356 + (fr - self._view_start) / self._span() * w_timeline)
+
+    def _frac(self, x: float) -> float:
+        w = self.width()
+        w_timeline = w - 356
+        if w_timeline <= 0:
+            return 0.0
+        gf = self._view_start + ((x - 356) / w_timeline) * self._span()
+        return max(0.0, min(1.0, gf))
+
+    def _emit_seek(self, x: float) -> None:
+        if x >= 356:
+            self.seeked.emit(self._frac(x))
+
+    def mousePressEvent(self, e) -> None:  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._emit_seek(e.position().x())
+
+    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self._emit_seek(e.position().x())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        mid = h / 2.0
+
+        # Background
+        p.fillRect(self.rect(), QColor("#10121a"))
+
+        # Bordo inferiore e separatore sinistro
+        p.setPen(QPen(QColor("#1e2230"), 1))
+        p.drawLine(0, h - 1, w, h - 1)
+        p.drawLine(356, 0, 356, h)
+
+        # Label nel pannello sinistro
+        p.setPen(QPen(QColor("#8b90a0"), 1))
+        p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        p.drawText(14, int(mid + 5), "TIMELINE")
+
+        span = self._span()
+        vs = self._view_start
+        ve = self._view_end
+
+        p.setFont(QFont("Segoe UI", 8))
+
+        bpb = self.engine.beats_per_bar if hasattr(self.engine, "beats_per_bar") else 4
+
+        if self._beats and self._duration > 0:
+            n_beats = len(self._beats)
+            beat_interval_sec = self._duration / max(1, n_beats)
+            beat_spacing_px = (w - 356) * (beat_interval_sec / self._duration) / span
+
+            decimation = 1
+            show_ticks = True
+            if beat_spacing_px >= 30:
+                decimation = 1
+            elif beat_spacing_px >= 12:
+                decimation = bpb
+            elif beat_spacing_px >= 6:
+                decimation = bpb * 2
+            elif beat_spacing_px >= 3:
+                decimation = bpb * 4
+            else:
+                show_ticks = False
+
+            if show_ticks:
+                for i, bt in enumerate(self._beats):
+                    fr = bt / self._duration
+                    if vs <= fr <= ve:
+                        bx = self._x_of(fr)
+                        is_bar_start = (i % bpb == 0)
+                        
+                        if i % decimation == 0:
+                            if is_bar_start:
+                                bar_num = (i // bpb) + 1
+                                p.setPen(QPen(QColor("#e6e8ee"), 1))
+                                p.drawLine(bx, h - 8, bx, h - 1)
+                                p.drawText(bx - 15, h - 10, 30, 10, Qt.AlignmentFlag.AlignCenter, f"{bar_num}")
+                            else:
+                                beat_in_bar = (i % bpb) + 1
+                                p.setPen(QPen(QColor("#50566d"), 1))
+                                p.drawLine(bx, h - 5, bx, h - 1)
+                                if beat_spacing_px >= 30:
+                                    p.drawText(bx - 10, h - 10, 20, 10, Qt.AlignmentFlag.AlignCenter, f".{beat_in_bar}")
+                        else:
+                            p.setPen(QPen(QColor("#3a3f50"), 1))
+                            p.drawLine(bx, h - 4, bx, h - 1)
+
+        elif self._duration > 0:
+            span_sec = self._duration * span
+            if span_sec <= 5:
+                step_sec = 0.5
+            elif span_sec <= 15:
+                step_sec = 1.0
+            elif span_sec <= 45:
+                step_sec = 5.0
+            elif span_sec <= 120:
+                step_sec = 10.0
+            elif span_sec <= 300:
+                step_sec = 30.0
+            elif span_sec <= 900:
+                step_sec = 60.0
+            else:
+                step_sec = 120.0
+
+            start_sec = math.floor(vs * self._duration / step_sec) * step_sec
+            end_sec = math.ceil(ve * self._duration)
+
+            t = start_sec
+            while t <= end_sec:
+                fr = t / self._duration
+                if vs <= fr <= ve:
+                    bx = self._x_of(fr)
+                    p.setPen(QPen(QColor("#8b90a0"), 1))
+                    p.drawLine(bx, h - 6, bx, h - 1)
+                    
+                    lbl = f"{int(t)}s" if t < 60 else f"{int(t)//60}:{int(t)%60:02d}"
+                    p.drawText(bx - 20, h - 18, 40, 10, Qt.AlignmentFlag.AlignCenter, lbl)
+                t += step_sec
+
+        # playhead
+        px = self._x_of(self._progress)
+        if 356 <= px <= w:
+            p.setPen(QPen(QColor("#ffffff"), 1.5))
+            p.drawLine(px, 0, px, h)
+            
+            # Triangolino arancione
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor("#ff9f43"))
+            points = [
+                QPoint(px - 5, 0),
+                QPoint(px + 5, 0),
+                QPoint(px, 6)
+            ]
+            p.drawPolygon(points)
+
+        p.end()
 
 
 class TrackStrip(QWidget):
@@ -415,6 +597,8 @@ class TrackStrip(QWidget):
 class MixerTab(QWidget):
     """Scheda mixer completa."""
 
+    song_loaded = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.engine = MixerEngine()
@@ -585,11 +769,44 @@ class MixerTab(QWidget):
         root.addLayout(chord_row)
 
         # area strisce
+        self.timeline = TimelineWidget(self.engine)
+        self.timeline.seeked.connect(self._on_wave_seek)
+        root.addWidget(self.timeline)
+
         self.strips_box = QVBoxLayout()
         self.strips_box.setSpacing(2)
         strips_host = QWidget()
         strips_host.setLayout(self.strips_box)
         root.addWidget(strips_host, 1)
+
+        # scrollbar dello zoom
+        self.zoom_scrollbar = QScrollBar(Qt.Orientation.Horizontal)
+        self.zoom_scrollbar.setRange(0, 10000)
+        self.zoom_scrollbar.setValue(0)
+        self.zoom_scrollbar.setPageStep(10000)
+        self.zoom_scrollbar.setStyleSheet("""
+            QScrollBar:horizontal {
+                border: none;
+                background: #161922;
+                height: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #2e3440;
+                min-width: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #434c5e;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
+                width: 0px;
+            }
+        """)
+        self.zoom_scrollbar.valueChanged.connect(self._on_scrollbar_changed)
+        root.addWidget(self.zoom_scrollbar)
 
         # --- riga controlli: velocità, loop, metronomo ---
         ctrl = QHBoxLayout()
@@ -831,6 +1048,8 @@ class MixerTab(QWidget):
         except Exception:  # noqa: BLE001
             pass
 
+        self.song_loaded.emit(folder)
+
     def _build_strips(self, files: list[tuple[str, str]]) -> None:
         # svuota
         while self.strips_box.count():
@@ -849,9 +1068,9 @@ class MixerTab(QWidget):
             strip.wave.loop_selected.connect(self._on_wave_loop)
             strip.wave.wheel_zoom.connect(self._on_wheel_zoom)
             strip.wave.wheel_pan.connect(self._on_wheel_pan)
-            strip.wave.set_view(self._view[0], self._view[1])
             self.strips_box.addWidget(strip)
             self.strips.append(strip)
+        self._apply_view()
 
     # ---------- zoom waveform (vista condivisa fra le tracce) ----------
 
@@ -860,6 +1079,16 @@ class MixerTab(QWidget):
     def _apply_view(self) -> None:
         for s in self.strips:
             s.wave.set_view(self._view[0], self._view[1])
+        if hasattr(self, "timeline"):
+            self.timeline.set_view(self._view[0], self._view[1])
+        if hasattr(self, "zoom_scrollbar"):
+            s, e = self._view
+            span = e - s
+            self.zoom_scrollbar.blockSignals(True)
+            self.zoom_scrollbar.setRange(0, int(10000 * (1.0 - span)))
+            self.zoom_scrollbar.setPageStep(int(10000 * span))
+            self.zoom_scrollbar.setValue(int(10000 * s))
+            self.zoom_scrollbar.blockSignals(False)
 
     def _zoom_at(self, steps: int, center: float | None) -> None:
         """Zoom tenendo fisso `center` (frazione globale); None = centro vista."""
@@ -897,6 +1126,14 @@ class MixerTab(QWidget):
         self._view = [s + delta, e + delta]
         self._apply_view()
 
+    def _on_scrollbar_changed(self, value: int) -> None:
+        s, e = self._view
+        span = e - s
+        ns = value / 10000.0
+        ne = ns + span
+        self._view = [max(0.0, ns), min(1.0, ne)]
+        self._apply_view()
+
     def _on_beatgrid_toggle(self, on: bool) -> None:
         self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;" if on else "")
         fr = self._beat_fracs if on else []
@@ -923,6 +1160,8 @@ class MixerTab(QWidget):
         self._beat_fracs = []
         for s in getattr(self, "strips", []):
             s.wave.set_beats([])
+        if hasattr(self, "timeline"):
+            self.timeline.set_data([], self.engine.duration())
 
     def _apply_analysis(self, d: dict) -> None:
         key = d.get("key")
@@ -949,6 +1188,8 @@ class MixerTab(QWidget):
         show = self._beat_fracs if self.beatgrid_btn.isChecked() else []
         for s in getattr(self, "strips", []):
             s.wave.set_beats(show)
+        if hasattr(self, "timeline"):
+            self.timeline.set_data(beats, dur)
         # accordi rilevati
         self._chords = [c for c in (d.get("chords") or []) if isinstance(c, dict)]
         self._chord_times = [float(c.get("time", 0.0)) for c in self._chords]
@@ -1475,6 +1716,8 @@ class MixerTab(QWidget):
             any_solo = any(st.s_btn.isChecked() for st in self.strips)
             audible = s.s_btn.isChecked() if any_solo else not s.m_btn.isChecked()
             s.wave.set_dim(not audible)
+        if hasattr(self, "timeline"):
+            self.timeline.set_progress(frac)
         # auto-scroll della vista zoomata: segue il playhead in riproduzione
         vs, ve = self._view
         span = ve - vs

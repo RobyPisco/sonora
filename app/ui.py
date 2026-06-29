@@ -50,6 +50,7 @@ from .downloader import (
     run_search_task,
 )
 from .ui_mixer import MixerTab
+from .ui_lyrics import LyricsTab
 
 STEM_MODES = [
     ("Roformer — 6 stem (top, lento)", "rof6"),
@@ -422,8 +423,11 @@ class MainWindow(QWidget):
         dl_tab = QWidget()
         dl_tab.setObjectName("Root")
         self.mixer_tab = MixerTab()
+        self.lyrics_tab = LyricsTab(self)
+        self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
         self.tabs.addTab(dl_tab, "Scarica")
         self.tabs.addTab(self.mixer_tab, "Mixer")
+        self.tabs.addTab(self.lyrics_tab, "Testi")
 
         page = QVBoxLayout(dl_tab)
         page.setContentsMargins(0, 0, 0, 0)

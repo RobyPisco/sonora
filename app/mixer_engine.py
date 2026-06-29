@@ -266,14 +266,21 @@ class MixerEngine:
     def render_buffers(self, speed: float, semitones: float) -> list[np.ndarray]:
         """Calcola (CPU) i buffer trasformati dai dati originali: prima il pitch
         shift (durata invariata), poi il time-stretch. Da chiamare nel worker."""
-        from .timestretch import pitch_shift, time_stretch
+        from .timestretch import pitch_shift, time_stretch, rubberband_process
         out: list[np.ndarray] = []
+        stretch = 1.0 / speed
         for t in self.tracks:
             buf = t.data_orig
-            if abs(semitones) > 1e-6:
-                buf = pitch_shift(buf, semitones)
-            if abs(speed - 1.0) > 1e-3:
-                buf = time_stretch(buf, 1.0 / speed)
+            # Prova a fare entrambi in una sola passata con rubberband
+            rb_buf = rubberband_process(buf, stretch=stretch, semitones=semitones, sr=self.sr)
+            if rb_buf is not None:
+                buf = rb_buf
+            else:
+                # Fallback se rubberband non è disponibile o fallisce
+                if abs(semitones) > 1e-6:
+                    buf = pitch_shift(buf, semitones, sr=self.sr)
+                if abs(speed - 1.0) > 1e-3:
+                    buf = time_stretch(buf, stretch, sr=self.sr)
             out.append(np.ascontiguousarray(buf, dtype="float32"))
         return out
 

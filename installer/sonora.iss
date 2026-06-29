@@ -3,7 +3,7 @@
 ; Prima di compilare esegui la build:  pyinstaller build.spec --noconfirm
 
 #define AppName "Sonora"
-#define AppVersion "1.5.2"
+#define AppVersion "1.5.3"
 #define AppPublisher "Pisco Factory"
 #define AppExe "Sonora.exe"
 

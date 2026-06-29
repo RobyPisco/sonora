@@ -50,6 +50,9 @@ datas = [
     (str(project / "bin" / "ffmpeg.exe"), "bin"),
     (str(project / "bin" / "ffprobe.exe"), "bin"),
     (str(project / "bin" / "uv.exe"), "bin"),
+    (str(project / "bin" / "rubberband.exe"), "bin"),
+    (str(project / "bin" / "rubberband-r3.exe"), "bin"),
+    (str(project / "bin" / "sndfile.dll"), "bin"),
     # script eseguiti dal venv del motore (file sorgente reali)
     (str(project / "app" / "analyze_script.py"), "app_scripts"),
     (str(project / "app" / "roformer_script.py"), "app_scripts"),

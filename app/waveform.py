@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 
@@ -135,32 +135,62 @@ class WaveformWidget(QWidget):
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         mid = h / 2.0
         p.fillRect(self.rect(), QColor("#161922"))
         vs, span = self._view_start, self._span()
 
         n = len(self._maxs)
+        px = self._x_of(self._progress)
+
         if n:
-            col = QColor(self._color)
+            col_active = QColor(self._color)
             if self._dim:
-                col.setAlpha(70)
-            p.setPen(QPen(col, 1))
-            for x in range(w):
-                # x → frazione globale (con zoom) → indice nei peak
-                idx = int((vs + (x / w) * span) * n)
-                idx = min(max(idx, 0), n - 1)
-                top = mid - self._maxs[idx] * (mid - 2)
-                bot = mid - self._mins[idx] * (mid - 2)
-                p.drawLine(x, int(top), x, int(bot))
+                col_active.setAlpha(70)
+
+            # Il colore di sfondo della waveform non ancora suonata è più spento
+            col_unplayed = QColor(col_active)
+            col_unplayed.setAlpha(40 if self._dim else 75)
+
+            def draw_waveform_lines(color: QColor, use_gradient: bool):
+                if use_gradient:
+                    grad = QLinearGradient(0, 4, 0, h - 4)
+                    grad.setColorAt(0.0, color.lighter(130))
+                    grad.setColorAt(0.5, color)
+                    grad.setColorAt(1.0, color.darker(130))
+                    pen = QPen(QBrush(grad), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                else:
+                    pen = QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                p.setPen(pen)
+
+                # Disegno a barre verticali con spaziatura (larghezza barra 2px, passo 3px)
+                for x in range(0, w, 3):
+                    idx = int((vs + (x / w) * span) * n)
+                    idx = min(max(idx, 0), n - 1)
+                    top = mid - self._maxs[idx] * (mid - 4)
+                    bot = mid - self._mins[idx] * (mid - 4)
+                    # Forza una minima linea centrale visibile anche per silenzio
+                    if bot - top < 2.0:
+                        top = mid - 1.0
+                        bot = mid + 1.0
+                    p.drawLine(x, int(top), x, int(bot))
+
+            # 1. Disegna l'intera waveform nello stato spento (non riprodotto)
+            draw_waveform_lines(col_unplayed, use_gradient=False)
+
+            # 2. Sovrascrive con la parte attiva (suonata) applicando il clip a sinistra del playhead
+            if px > 0:
+                p.save()
+                p.setClipRect(0, 0, px, h)
+                draw_waveform_lines(col_active, use_gradient=True)
+                p.restore()
 
         # linea centrale tenue
-        p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+        p.setPen(QPen(QColor(255, 255, 255, 14), 1))
         p.drawLine(0, int(mid), w, int(mid))
 
-        # beat grid (linee verticali tenui); saltato se i beat visibili sono
-        # troppo fitti per la larghezza, così non diventano un muro grigio
+        # beat grid (linee verticali tenui)
         if self._beats:
             visible = [fr for fr in self._beats if vs < fr < self._view_end]
             if visible and w / len(visible) >= 5:
@@ -183,19 +213,15 @@ class WaveformWidget(QWidget):
             a, b = self._loop
             ax = max(0, min(w, self._x_of(a)))
             bx = max(0, min(w, self._x_of(b)))
-            p.fillRect(QRectF(ax, 0, max(1, bx - ax), h), QColor(61, 220, 132, 30))
+            p.fillRect(QRectF(ax, 0, max(1, bx - ax), h), QColor(61, 220, 132, 24))
             p.setPen(QPen(QColor("#3ddc84"), 1))
             p.drawLine(ax, 0, ax, h)
             p.drawLine(bx, 0, bx, h)
 
         # playhead
-        px = self._x_of(self._progress)
         if 0 <= px <= w:
-            p.setPen(QPen(QColor("#ffffff"), 1))
+            p.setPen(QPen(QColor("#ffffff"), 1.5))
             p.drawLine(px, 0, px, h)
-        # ombreggiatura della parte già suonata (entro la vista)
-        fill_x = max(0, min(w, px))
-        p.fillRect(QRectF(0, 0, fill_x, h), QColor(255, 255, 255, 12))
         p.end()
 
     def wheelEvent(self, e) -> None:  # noqa: N802

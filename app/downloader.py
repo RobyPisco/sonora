@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -189,6 +190,8 @@ class DownloadWorker(QObject):
                 self.log.emit("✖ annullato")
                 break
             except Exception as exc:  # noqa: BLE001 — vogliamo riportare qualsiasi errore in UI
+                logging.getLogger("sonora.downloader").exception(
+                    "download fallito: %s", item.url)
                 msg = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
                 self.item_finished.emit(idx, False, msg)
                 self.log.emit(f"✖ errore: {msg}")

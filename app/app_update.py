@@ -16,6 +16,7 @@ Flusso "notifica + download":
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -71,7 +72,9 @@ def check_latest() -> dict | None:
     try:
         with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310
             data = json.loads(r.read())
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("sonora.update").warning(
+            "controllo aggiornamenti fallito (%s): %s", repo, exc)
         return None
     tag = (data.get("tag_name") or "").lstrip("vV")
     if not tag:
@@ -174,6 +177,8 @@ class DownloadInstallerWorker(QObject):
             self.log.emit(f"Scaricato {mb:.1f} MB.")
             self.finished.emit(True, str(dest))
         except Exception as exc:  # noqa: BLE001
+            logging.getLogger("sonora.update").exception(
+                "download installer fallito: %s", self._url)
             msg = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
             self.finished.emit(False, msg)
 

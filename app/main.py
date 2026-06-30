@@ -7,13 +7,14 @@ import sys
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from . import paths, updater
+from . import logging_setup, paths, updater
 
 # Applica l'eventuale yt-dlp aggiornato PRIMA di importare moduli che usano yt_dlp.
 updater.apply_override()
 
 
 def main() -> int:
+    logging_setup.setup()   # logging su file + excepthook, prima di tutto il resto
     app = QApplication(sys.argv)
     app.setApplicationName("Sonora")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -111,10 +112,13 @@ class StemWorker(QObject):
                     self.log.emit("Analisi del brano (BPM, tonalità, beat)…")
                     stems.analyze(out_dir, self.log.emit, lambda: self._cancel)
                 except Exception as exc:  # noqa: BLE001
+                    logging.getLogger("sonora.stems").warning("analisi saltata: %s", exc)
                     msg = str(exc).splitlines()[0] if str(exc) else "errore"
                     self.log.emit(f"analisi saltata: {msg}")
             self.finished.emit(True, out_dir)
         except Exception as exc:  # noqa: BLE001
+            logging.getLogger("sonora.stems").exception(
+                "separazione fallita (mode=%s): %s", self._mode, self._input)
             self.finished.emit(False, str(exc).splitlines()[0] if str(exc) else "errore")
 
 

@@ -87,6 +87,8 @@ Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.
   l'auto-update). Certificato OV ~100-400€/anno.
 
 ## Note
+- **Log**: `%APPDATA%/Sonora/sonora.log` (rotante, 1MB×4) — crash non gestiti (excepthook),
+  download/separazioni fallite, errori auto-update. Inizializzato in `main.py` via `app/logging_setup.py`.
 - Settings/cronologia/analysis/sessioni mixer in `%APPDATA%/Sonora/`.
 - Inno Setup installato in `%LOCALAPPDATA%\Programs\Inno Setup 6\` (non nel path di default).
 - Build + installer 1.5.4 rigenerati e deploy testato funzionante (giugno 2026).

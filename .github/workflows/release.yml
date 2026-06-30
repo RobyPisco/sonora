@@ -56,21 +56,23 @@ jobs:
           Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffmpeg.exe  | Select-Object -First 1).FullName bin/
           Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffprobe.exe | Select-Object -First 1).FullName bin/
 
-          # rubberband (opzionale): se esiste una release "deps" con uno zip, includilo
-          try {
-            gh release download deps --repo $env:GITHUB_REPOSITORY --pattern "rubberband*.zip" --dir _bindl 2>$null
-            $rb = Get-ChildItem _bindl -Filter "rubberband*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($rb) {
-              Expand-Archive $rb.FullName -DestinationPath bin -Force
-              Write-Host "rubberband incluso da release deps."
-            } else {
-              Write-Host "rubberband non fornito: l'app userà il fallback numpy."
-            }
-          } catch {
-            Write-Host "rubberband non disponibile: fallback numpy. ($_)"
+          # rubberband (opzionale): se esiste una release "deps" con uno zip, includilo.
+          # gh esce con codice !=0 se la release/asset non esiste: lo azzeriamo perché
+          # è best-effort e NON deve far fallire lo step (il LASTEXITCODE residuo di un
+          # comando nativo farebbe fallire l'intero step pwsh).
+          gh release download deps --repo $env:GITHUB_REPOSITORY --pattern "rubberband*.zip" --dir _bindl 2>$null
+          $global:LASTEXITCODE = 0
+          $rb = Get-ChildItem _bindl -Filter "rubberband*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($rb) {
+            Expand-Archive $rb.FullName -DestinationPath bin -Force
+            Write-Host "rubberband incluso da release deps."
+          } else {
+            Write-Host "rubberband non fornito: l'app userà il fallback numpy."
           }
 
-          Write-Host "--- bin/ ---"; Get-ChildItem bin | Select-Object Name, Length
+          Write-Host "--- bin/ ---"
+          Get-ChildItem bin | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+          $global:LASTEXITCODE = 0
 
       - name: Leggi versione (e verifica il tag)
         id: ver

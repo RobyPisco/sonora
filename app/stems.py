@@ -312,41 +312,57 @@ def _seed_pip(log_cb: LogCb, cancel: Cancel) -> bool:
     return True
 
 
-def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
-    """Crea il venv 3.12, robusto al fallimento del link minor-version di uv.
+def _ensure_managed_py312(uv: str, log_cb: LogCb, cancel: Cancel) -> Path | None:
+    """Garantisce che il Python 3.12 gestito da uv sia scaricato; ritorna l'exe concreto.
 
-    In alcuni contesti di processo (token ristretto/sandbox) uv non può creare la
-    junction `cpython-3.12-...` del Python gestito → «untrusted mount point»
-    (os error 448). Però il Python REALE viene comunque scaricato: in quel caso si
-    crea il venv puntando direttamente all'eseguibile concreto, senza alcun link.
+    uv può fallire sulla creazione del *link* minor-version (`cpython-3.12-...` →
+    «untrusted mount point», os error 448), ma scarica comunque il Python REALE.
+    Per questo NON ci interessa il codice d'uscita: dopo il download cerchiamo
+    direttamente la cartella concreta `cpython-3.12.NN-...`.
+    """
+    exe = _managed_py312()
+    if exe is not None:
+        return exe
+    log_cb("Scarico Python 3.12 (uv)…")
+    rc = _stream([uv, "python", "install", "3.12"], log_cb, cancel)
+    if rc == -1:
+        return None
+    # anche se il link minor è fallito (448), il Python concreto è ora presente
+    return _managed_py312()
+
+
+def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
+    """Crea il venv 3.12 con lo stdlib `venv` del Python scaricato.
+
+    Perché NON `uv venv`: su questo sistema uv non può creare il link minor-version
+    (os error 448, mitigazione «redirection trust»). Il venv di uv produce allora un
+    `python.exe` *trampolino* che, per avviare il Python base, deve attraversare quel
+    link inesistente → «uv trampoline failed to spawn Python child process» (os error 2).
+    Lo stdlib `venv` invece copia un `python.exe` CPython normale, che trova la base via
+    `pyvenv.cfg` (percorso concreto diretto, nessuna junction) e include già pip.
     """
     if cancel():
         return False
-    exe = _managed_py312()
+    exe = _ensure_managed_py312(uv, log_cb, cancel)
     if exe is None:
-        # Python non ancora presente: tentativo standard (uv lo scarica). Può
-        # riuscire del tutto, oppure fallire SOLO sulla creazione del link.
-        shutil.rmtree(venv, ignore_errors=True)
-        rc = _stream([uv, "venv", str(venv), "--python", "3.12"], log_cb, cancel)
-        if rc == -1:
-            return False
-        if rc == 0 and venv_python().exists():
-            _normalize_pyvenv_home(venv, log_cb)
-            return _seed_pip(log_cb, cancel)
-        exe = _managed_py312()   # il download del Python è comunque avvenuto?
-    if exe is None:
-        log_cb("Python 3.12 non disponibile dopo il download.")
+        if not cancel():
+            log_cb("Python 3.12 non disponibile dopo il download.")
         return False
-    # Crea il venv dall'eseguibile concreto: nessun link da creare, niente 448.
-    log_cb("Creo il venv dal Python scaricato (evito il link che dà errore 448)…")
+    log_cb("Creo il venv col Python scaricato (stdlib venv, niente trampolino uv)…")
     shutil.rmtree(venv, ignore_errors=True)
-    rc = _stream([uv, "venv", str(venv), "--python", str(exe)], log_cb, cancel)
+    rc = _stream([str(exe), "-m", "venv", str(venv)], log_cb, cancel)
     if rc == -1:
         return False
-    if rc == 0 and venv_python().exists():
-        _normalize_pyvenv_home(venv, log_cb)
+    if rc != 0 or not venv_python().exists():
+        log_cb(f"Creazione venv fallita (codice {rc}).")
+        return False
+    if not _check_venv_python_works():
+        log_cb("Il Python del venv non si avvia.")
+        return False
+    # lo stdlib venv installa già pip via ensurepip; semina solo se mancasse
+    if not _has_pip():
         return _seed_pip(log_cb, cancel)
-    return False
+    return True
 
 
 def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:

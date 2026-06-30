@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollBar,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import config, history, paths, stems
+from .flowlayout import FlowLayout
 from .mixer_engine import MixerEngine
 from .waveform import WaveformWidget, compute_peaks
 
@@ -200,6 +202,18 @@ class ExportOptionsDialog(QDialog):
         return (self.chk_click.isChecked(),
                 self.chk_countin.isChecked(),
                 self.spin_beats.value())
+
+
+def _hgroup(*widgets, spacing: int = 6) -> QWidget:
+    """Raggruppa più widget in una riga orizzontale compatta (un blocco unico).
+    Usato coi FlowLayout così ogni cluster di controlli va a capo come unità."""
+    w = QWidget()
+    lay = QHBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(spacing)
+    for x in widgets:
+        lay.addWidget(x)
+    return w
 
 
 def _card(title: str, value: str, color: str = "#e6e8ee") -> tuple[QFrame, QLabel]:
@@ -686,17 +700,19 @@ class MixerTab(QWidget):
         self.tuner_btn.setObjectName("Ghost")
         self.tuner_btn.setToolTip("Accordatore: tono di riferimento A440 / corde + accordatore dal microfono.")
         self.tuner_btn.clicked.connect(self._open_tuner)
+        # il titolo può restringersi; i bottoni vanno a capo da soli se serve
+        self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        btns_host = QWidget()
+        btns_flow = FlowLayout(btns_host, hspacing=6, vspacing=6)
+        for b in (self.tuner_btn, self.export_btn, self.analyze_btn,
+                  self.recent_btn, load_btn):
+            btns_flow.addWidget(b)
         top.addWidget(self.title_lbl, 1)
-        top.addWidget(self.tuner_btn)
-        top.addWidget(self.export_btn)
-        top.addWidget(self.analyze_btn)
-        top.addWidget(self.recent_btn)
-        top.addWidget(load_btn)
+        top.addWidget(btns_host)
         root.addLayout(top)
 
-        # pannello analisi (cards)
-        self.cards_row = QHBoxLayout()
-        self.cards_row.setSpacing(10)
+        # pannello analisi (cards) — reflow: vanno a capo su schermi stretti
+        self.cards_row = FlowLayout(hspacing=10, vspacing=10)
         self.card_key = _card("TONALITÀ", "—", "#ff9f43")
         self.card_bpm = _card("BPM", "—")
         self.card_scale = _card("SCALA", "—")
@@ -706,15 +722,16 @@ class MixerTab(QWidget):
         self.card_ts = _card("TEMPO STABILITY", "—", "#3ddc84")
         for c, _v in (self.card_key, self.card_bpm, self.card_scale, self.card_dur,
                       self.card_lufs, self.card_dr, self.card_ts):
-            self.cards_row.addWidget(c, 1)
+            c.setMinimumWidth(132)
+            self.cards_row.addWidget(c)
         root.addLayout(self.cards_row)
 
-        # presenza per stem
-        self.presence_row = QHBoxLayout()
-        self.presence_row.setSpacing(10)
+        # presenza per stem — reflow su schermi stretti
+        self.presence_row = FlowLayout(hspacing=16, vspacing=6)
         self.presence_lbls: dict[str, QLabel] = {}
         for name in STEM_ORDER:
             box = QVBoxLayout()
+            box.setContentsMargins(0, 0, 0, 0)
             box.setSpacing(2)
             t = QLabel(STEM_LABEL[name].upper())
             t.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:600;")
@@ -723,7 +740,10 @@ class MixerTab(QWidget):
             box.addWidget(t)
             box.addWidget(v)
             self.presence_lbls[name] = v
-            self.presence_row.addLayout(box, 1)
+            cell = QWidget()
+            cell.setLayout(box)
+            cell.setMinimumWidth(72)
+            self.presence_row.addWidget(cell)
         root.addLayout(self.presence_row)
 
         # riga sezioni (struttura del brano): pulsanti per saltare/loopare
@@ -808,9 +828,8 @@ class MixerTab(QWidget):
         self.zoom_scrollbar.valueChanged.connect(self._on_scrollbar_changed)
         root.addWidget(self.zoom_scrollbar)
 
-        # --- riga controlli: velocità, loop, metronomo ---
-        ctrl = QHBoxLayout()
-        ctrl.setSpacing(8)
+        # --- riga controlli: velocità, loop, metronomo (reflow su schermi stretti) ---
+        ctrl = FlowLayout(hspacing=12, vspacing=8)
         sp_lbl = QLabel("Velocità")
         sp_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
@@ -904,27 +923,21 @@ class MixerTab(QWidget):
         self.click_vol.setRange(0, 100); self.click_vol.setValue(60)
         self.click_vol.setFixedWidth(80)
         self.click_vol.valueChanged.connect(lambda v: self.engine.set_click(self.click_btn.isChecked(), v / 100))
-        ctrl.addWidget(sp_lbl); ctrl.addWidget(self.speed_slider); ctrl.addWidget(self.speed_lbl)
-        ctrl.addWidget(preset_host)
-        ctrl.addSpacing(12)
-        ctrl.addWidget(pitch_lbl); ctrl.addWidget(self.pitch_slider); ctrl.addWidget(self.pitch_lbl)
-        ctrl.addSpacing(16)
-        ctrl.addWidget(QLabel("Loop")); ctrl.addWidget(self.a_btn); ctrl.addWidget(self.b_btn)
-        ctrl.addWidget(self.loop_btn); ctrl.addWidget(self.loopclr_btn)
-        ctrl.addWidget(self.autospeed_btn)
+        loop_lbl = QLabel("Loop"); loop_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
         loop_hint = QLabel("Ctrl+trascina sulla traccia")
         loop_hint.setStyleSheet("color:#6b7080; font-size:10px; font-style:italic;")
         loop_hint.setToolTip("Tieni premuto Ctrl (o Shift) e trascina sulla waveform "
                              "per selezionare la regione da ripetere.")
-        ctrl.addWidget(loop_hint)
-        ctrl.addSpacing(12)
         zoom_lbl = QLabel("Zoom"); zoom_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
-        ctrl.addWidget(zoom_lbl)
-        ctrl.addWidget(self.zoomout_btn); ctrl.addWidget(self.zoomin_btn); ctrl.addWidget(self.zoomfit_btn)
-        ctrl.addWidget(self.beatgrid_btn)
-        ctrl.addStretch(1)
-        ctrl.addWidget(self.click_btn); ctrl.addWidget(self.steady_btn)
-        ctrl.addWidget(self.click_vol)
+        # ogni cluster resta unito e va a capo come blocco quando manca spazio
+        ctrl.addWidget(_hgroup(sp_lbl, self.speed_slider, self.speed_lbl, preset_host))
+        ctrl.addWidget(_hgroup(pitch_lbl, self.pitch_slider, self.pitch_lbl))
+        ctrl.addWidget(_hgroup(loop_lbl, self.a_btn, self.b_btn, self.loop_btn,
+                               self.loopclr_btn, self.autospeed_btn))
+        ctrl.addWidget(loop_hint)   # voce a sé: non allarga il cluster Loop
+        ctrl.addWidget(_hgroup(zoom_lbl, self.zoomout_btn, self.zoomin_btn,
+                               self.zoomfit_btn, self.beatgrid_btn))
+        ctrl.addWidget(_hgroup(self.click_btn, self.steady_btn, self.click_vol))
         root.addLayout(ctrl)
 
         # transport

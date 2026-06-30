@@ -47,7 +47,9 @@ Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.
 - **Accordatore** (dialog dal pulsante "🎼 Accordatore" nel mixer): tono di riferimento A440 / corde
   chitarra+basso e **accordatore dal microfono** (pitch via autocorrelazione FFT, niente Qt nel core).
 - **UI responsive**: la scheda Scarica passa da due colonne (largo) a colonna unica impilata (< 900 px),
-  niente più sovrapposizioni su monitor piccoli (vedi `MainWindow._apply_layout`).
+  niente più sovrapposizioni su monitor piccoli (vedi `MainWindow._apply_layout`). Il **mixer** usa
+  `FlowLayout` (`app/flowlayout.py`) su toolbar, card analisi, presenza e barra controlli: i blocchi
+  vanno a capo da soli su schermi stretti (testato fino a 560 px, niente sforamento orizzontale).
 
 ## Architettura chiave
 - Main app gira su **Python 3.14** (PyInstaller onedir → `dist/Sonora/Sonora.exe`).

@@ -1,35 +1,31 @@
-# Crea bin.zip con i binari bundlati (per la CI) a partire dalla cartella bin/.
-# bin/ è gitignorato (troppo grande), quindi la CI li recupera da una release
-# fissa con tag "deps".
+# OPZIONALE — impacchetta rubberband per la CI.
 #
-# Uso (una tantum, dalla root del progetto):
-#   pwsh tools/make-bin-zip.ps1
-#   gh release create deps bin.zip -t "binari bundlati" -n "binari per la build CI"
+# La CI scarica da sola ffmpeg/ffprobe/uv da fonti ufficiali, quindi NON servono.
+# rubberband/sndfile.dll sono opzionali: senza, l'app usa il phase-vocoder numpy
+# (qualità di time-stretch più bassa). Se vuoi rubberband nelle build CI, crea
+# questo zip e caricalo in una release con tag "deps":
 #
-# Quando aggiorni un binario (es. nuovo ffmpeg), rigenera e ricarica:
 #   pwsh tools/make-bin-zip.ps1
-#   gh release upload deps bin.zip --clobber
+#   gh release create deps rubberband-win64.zip -t "binari opzionali" -n "rubberband per la CI"
+#   # aggiornamenti successivi:
+#   gh release upload deps rubberband-win64.zip --clobber
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root "bin"
-$zip = Join-Path $root "bin.zip"
+$zip = Join-Path $root "rubberband-win64.zip"
 
-$required = @(
-    "ffmpeg.exe", "ffprobe.exe", "uv.exe",
-    "rubberband.exe", "rubberband-r3.exe", "sndfile.dll"
-)
-
-$missing = $required | Where-Object { -not (Test-Path (Join-Path $bin $_)) }
-if ($missing) {
-    Write-Error "Mancano in bin/: $($missing -join ', ')"
+$files = @("rubberband.exe", "rubberband-r3.exe", "sndfile.dll")
+$present = $files | Where-Object { Test-Path (Join-Path $bin $_) }
+if (-not $present) {
+    Write-Error "Nessun file rubberband trovato in bin/ ($($files -join ', '))."
     exit 1
 }
 
 if (Test-Path $zip) { Remove-Item $zip -Force }
 
-# Zippa i CONTENUTI di bin/ (file alla radice dell'archivio, niente sottocartella
-# bin/), così in CI Expand-Archive -DestinationPath bin li mette al posto giusto.
-Compress-Archive -Path (Join-Path $bin "*") -DestinationPath $zip -CompressionLevel Optimal
-Write-Host "Creato $zip"
-Get-ChildItem $zip | Format-List Name, Length
+# Zippa i CONTENUTI (file alla radice dell'archivio): in CI Expand-Archive
+# -DestinationPath bin li mette direttamente in bin/.
+$paths = $present | ForEach-Object { Join-Path $bin $_ }
+Compress-Archive -Path $paths -DestinationPath $zip -CompressionLevel Optimal
+Write-Host "Creato $zip con: $($present -join ', ')"

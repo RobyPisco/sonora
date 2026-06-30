@@ -1,16 +1,20 @@
 name: Release
 
-# Builda exe + installer e pubblica la GitHub Release al push di un tag vX.Y.Z.
-# Il tag DEVE combaciare con __version__ in app/__init__.py.
+# Builda exe + installer. Due modi:
+#   - push di un tag vX.Y.Z  -> build + PUBBLICA la GitHub Release
+#   - avvio manuale (Actions -> Release -> Run workflow) -> solo build (dry-run),
+#     utile per verificare che tutto compili senza creare release.
 #
-# Prerequisito una-tantum: una release fissa con tag "deps" contenente bin.zip
-# (ffmpeg.exe, ffprobe.exe, uv.exe, rubberband.exe, rubberband-r3.exe, sndfile.dll),
-# perché bin/ è gitignorato. Crea il pacchetto con tools/make-bin-zip.ps1 e
-# caricalo: gh release create deps bin.zip -t "binari bundlati" -n "uso CI".
+# I binari richiesti (ffmpeg/ffprobe/uv) vengono scaricati da fonti ufficiali nel
+# job, quindi bin/ (gitignorato) non serve nel repo. rubberband/sndfile sono
+# opzionali (l'app ripiega sul phase-vocoder numpy): se vuoi includerli, carica
+# un asset "rubberband-win64.zip" in una release con tag "deps" (vedi
+# tools/make-bin-zip.ps1) e il job lo aggiungerà automaticamente.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write   # serve a softprops/action-gh-release per creare la release
@@ -32,27 +36,56 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Scarica i binari bundlati (bin/)
+      - name: Procura i binari (ffmpeg/ffprobe/uv + rubberband opzionale)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download deps --repo $env:GITHUB_REPOSITORY --pattern bin.zip --output bin.zip
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force bin | Out-Null
-          Expand-Archive bin.zip -DestinationPath bin -Force
-          Get-ChildItem bin
+          New-Item -ItemType Directory -Force _bindl | Out-Null
 
-      - name: Leggi versione e verifica il tag
+          # uv (richiesto: crea il motore stem)
+          Invoke-WebRequest "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" -OutFile _bindl/uv.zip
+          Expand-Archive _bindl/uv.zip -DestinationPath _bindl/uv -Force
+          Copy-Item (Get-ChildItem _bindl/uv -Recurse -Filter uv.exe | Select-Object -First 1).FullName bin/
+
+          # ffmpeg + ffprobe (richiesti: estrazione/conversione audio)
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip" -OutFile _bindl/ffmpeg.zip
+          Expand-Archive _bindl/ffmpeg.zip -DestinationPath _bindl/ffmpeg -Force
+          Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffmpeg.exe  | Select-Object -First 1).FullName bin/
+          Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffprobe.exe | Select-Object -First 1).FullName bin/
+
+          # rubberband (opzionale): se esiste una release "deps" con uno zip, includilo
+          try {
+            gh release download deps --repo $env:GITHUB_REPOSITORY --pattern "rubberband*.zip" --dir _bindl 2>$null
+            $rb = Get-ChildItem _bindl -Filter "rubberband*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($rb) {
+              Expand-Archive $rb.FullName -DestinationPath bin -Force
+              Write-Host "rubberband incluso da release deps."
+            } else {
+              Write-Host "rubberband non fornito: l'app userà il fallback numpy."
+            }
+          } catch {
+            Write-Host "rubberband non disponibile: fallback numpy. ($_)"
+          }
+
+          Write-Host "--- bin/ ---"; Get-ChildItem bin | Select-Object Name, Length
+
+      - name: Leggi versione (e verifica il tag)
         id: ver
         shell: pwsh
         run: |
           $v = (Select-String -Path app/__init__.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          if ($tag -ne $v) {
-            Write-Error "Tag '$tag' != __version__ '$v' in app/__init__.py. Allineali prima di taggare."
-            exit 1
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}".TrimStart('v')
+            if ($tag -ne $v) {
+              Write-Error "Tag '$tag' != __version__ '$v' in app/__init__.py. Allineali prima di taggare."
+              exit 1
+            }
           }
+          Write-Host "Versione: $v"
 
       - name: Build exe (PyInstaller)
         run: pyinstaller build.spec --noconfirm
@@ -67,7 +100,14 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\sonora.iss
 
-      - name: Pubblica la Release
+      - name: Carica l'installer come artifact (sempre)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SonoraSetup
+          path: dist_installer/SonoraSetup-*.exe
+
+      - name: Pubblica la Release (solo su tag)
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: dist_installer/SonoraSetup-*.exe

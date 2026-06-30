@@ -46,13 +46,15 @@ try:
 except Exception:
     _exe_version = None
 
-datas = [
-    (str(project / "bin" / "ffmpeg.exe"), "bin"),
-    (str(project / "bin" / "ffprobe.exe"), "bin"),
-    (str(project / "bin" / "uv.exe"), "bin"),
-    (str(project / "bin" / "rubberband.exe"), "bin"),
-    (str(project / "bin" / "rubberband-r3.exe"), "bin"),
-    (str(project / "bin" / "sndfile.dll"), "bin"),
+# Binari bundlati. ffmpeg/ffprobe/uv sono richiesti a runtime; rubberband* e
+# sndfile.dll sono opzionali (timestretch.py ripiega sul phase-vocoder numpy se
+# assenti). Si includono solo quelli effettivamente presenti in bin/, così la
+# build non fallisce in CI quando i binari opzionali non sono stati forniti.
+_bin_files = ["ffmpeg.exe", "ffprobe.exe", "uv.exe",
+              "rubberband.exe", "rubberband-r3.exe", "sndfile.dll"]
+datas = [(str(project / "bin" / b), "bin")
+         for b in _bin_files if (project / "bin" / b).exists()]
+datas += [
     # script eseguiti dal venv del motore (file sorgente reali)
     (str(project / "app" / "analyze_script.py"), "app_scripts"),
     (str(project / "app" / "roformer_script.py"), "app_scripts"),

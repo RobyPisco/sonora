@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.5.3** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -15,9 +15,11 @@ Versione corrente: **1.5.3** (allineata in `app/__init__.py`, `installer/sonora.
   chiude l'istanza con `CloseApplications=yes`). Anche manuale da tray "Controlla aggiornamenti app".
   Disattivabile con `auto_check_updates: false` in settings.json.
 - **CI release** (`.github/workflows/release.yml`): al push di un tag `vX.Y.Z` builda exe+installer su
-  runner Windows e pubblica la Release. Prerequisito una-tantum: release fissa tag `deps` con `bin.zip`
-  (i binari di `bin/`, gitignorati) — crealo con `tools/make-bin-zip.ps1`. Il tag deve combaciare con
-  `__version__` in `app/__init__.py`.
+  runner Windows e pubblica la Release. **Autosufficiente**: scarica ffmpeg/ffprobe/uv da fonti ufficiali
+  (BtbN, astral), nessun `bin/` da fornire. rubberband/sndfile opzionali (fallback numpy); per includerli
+  carica `rubberband-win64.zip` in una release tag `deps` (vedi `tools/make-bin-zip.ps1`). Il tag deve
+  combaciare con `__version__` in `app/__init__.py`. Avvio manuale (`workflow_dispatch`) = build di prova
+  senza pubblicare, con l'installer caricato come artifact.
 - **Separazione stem**: click destro / "Separa file…" / drag. Modalità:
   - **Roformer 6 stem** (rof6) e **Roformer voce/strumentale** (rof, top karaoke) — via audio-separator / BS-RoFormer
   - **6hq** (ensemble Demucs htdemucs_ft+htdemucs_6s), **6**, **4**, **2** (Demucs)
@@ -71,15 +73,15 @@ Versione corrente: **1.5.3** (allineata in `app/__init__.py`, `installer/sonora.
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`
-- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.3.exe`
+- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.4.exe`
 
 ## DA FARE (idee proposte, scelta utente)
-- **Release iniziale auto-update**: creare la release fissa `deps` con `bin.zip` (vedi sopra), poi
-  bumpare `__version__`, committare e taggare `vX.Y.Z` per far partire la prima build CI.
+- **Rubberband in CI (opzionale)**: senza, le build CI usano il fallback numpy (time-stretch meno fine).
+  Per includerlo: `pwsh tools/make-bin-zip.ps1` + carica `rubberband-win64.zip` nella release `deps`.
 - **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto" (anche durante
   l'auto-update). Certificato OV ~100-400€/anno.
 
 ## Note
 - Settings/cronologia/analysis/sessioni mixer in `%APPDATA%/Sonora/`.
 - Inno Setup installato in `%LOCALAPPDATA%\Programs\Inno Setup 6\` (non nel path di default).
-- Build + installer 1.5.3 rigenerati e deploy testato funzionante (giugno 2026).
+- Build + installer 1.5.4 rigenerati e deploy testato funzionante (giugno 2026).

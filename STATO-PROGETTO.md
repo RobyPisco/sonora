@@ -70,6 +70,11 @@ Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.
 - `bin/` ffmpeg, ffprobe, uv, rubberband.exe, rubberband-r3.exe, sndfile.dll
 - `resources/` qss, svg, icon · `build.spec` · `installer/sonora.iss`
 
+## Test
+- `pip install -r requirements-dev.txt` poi `python -m pytest` (22 test, moduli a logica pura:
+  app_update versioni/asset, timestretch, mixer_engine, analyze_script detect_key). Girano anche in CI
+  (`.github/workflows/tests.yml`) su push/PR a main. Niente GUI/rubberband richiesti.
+
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`

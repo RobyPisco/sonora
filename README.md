@@ -2,7 +2,7 @@
 
 **Italiano** · [English](#english)
 
-![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.5.4-orange)
+![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.5.5-orange)
 
 App desktop Windows per **scaricare audio da YouTube**, **separarlo in stem** e **esercitarsi** sui brani con un mixer di pratica, visualizzatore di testi e un accordatore. Tutto in locale.
 
@@ -65,7 +65,7 @@ Output: `dist/Sonora/Sonora.exe` (distribuisci l'intera cartella `dist/Sonora/`)
 1. Installa [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Fai la build PyInstaller (sopra).
 3. Compila: `ISCC.exe installer\sonora.iss`
-4. Output: `dist_installer\SonoraSetup-1.5.4.exe`
+4. Output: `dist_installer\SonoraSetup-1.5.5.exe`
 
 ## Motore stem (isolato)
 PyTorch non ha wheel CUDA per Python 3.14, quindi al primo uso Sonora crea un motore isolato (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. Download una-tantum **~3 GB**. Su PC senza GPU usa la CPU (più lento). I modelli Roformer (~centinaia di MB) si scaricano al primo uso in `%APPDATA%/Sonora/separator-models/`.
@@ -161,7 +161,7 @@ Output: `dist/Sonora/Sonora.exe` (ship the whole `dist/Sonora/` folder).
 ## Installer (optional)
 1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Run the PyInstaller build (above).
-3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.5.4.exe`.
+3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.5.5.exe`.
 
 ## Stem engine (isolated)
 PyTorch has no CUDA wheel for Python 3.14, so on first use Sonora builds an isolated engine (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. One-time **~3 GB** download. Falls back to CPU without a GPU. Roformer models download on first use to `%APPDATA%/Sonora/separator-models/`.

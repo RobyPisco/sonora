@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.5.5** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -73,14 +73,14 @@ Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.
 - `resources/` qss, svg, icon · `build.spec` · `installer/sonora.iss`
 
 ## Test
-- `pip install -r requirements-dev.txt` poi `python -m pytest` (22 test, moduli a logica pura:
-  app_update versioni/asset, timestretch, mixer_engine, analyze_script detect_key). Girano anche in CI
+- `pip install -r requirements-dev.txt` poi `python -m pytest` (23 test, moduli a logica pura:
+  app_update versioni/asset, timestretch, mixer_engine, analyze_script detect_key, logging). Girano anche in CI
   (`.github/workflows/tests.yml`) su push/PR a main. Niente GUI/rubberband richiesti.
 
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`
-- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.4.exe`
+- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.5.exe`
 
 ## DA FARE (idee proposte, scelta utente)
 - **Rubberband in CI (opzionale)**: senza, le build CI usano il fallback numpy (time-stretch meno fine).
@@ -93,4 +93,4 @@ Versione corrente: **1.5.4** (allineata in `app/__init__.py`, `installer/sonora.
   download/separazioni fallite, errori auto-update. Inizializzato in `main.py` via `app/logging_setup.py`.
 - Settings/cronologia/analysis/sessioni mixer in `%APPDATA%/Sonora/`.
 - Inno Setup installato in `%LOCALAPPDATA%\Programs\Inno Setup 6\` (non nel path di default).
-- Build + installer 1.5.4 rigenerati e deploy testato funzionante (giugno 2026).
+- Build + installer 1.5.5 rigenerati e deploy testato funzionante (giugno 2026).

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -44,8 +45,23 @@ _NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
 
 # ---------------- percorsi motore ----------------
 
+def _engine_base() -> Path:
+    """Cartella base che contiene il motore.
+
+    Predefinita: %APPDATA%/Sonora. Personalizzabile dalle impostazioni
+    (`stem_engine_dir`) per installare il motore su un altro disco/cartella.
+    """
+    try:
+        custom = (config.load().get("stem_engine_dir") or "").strip()
+    except Exception:  # noqa: BLE001
+        custom = ""
+    if custom:
+        return Path(custom)
+    return config.config_dir()
+
+
 def engine_dir() -> Path:
-    return config.config_dir() / "stem-engine"
+    return _engine_base() / "stem-engine"
 
 
 def venv_python() -> Path:
@@ -393,18 +409,90 @@ def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
                 log_cb(f"Errore (codice {rc}) durante: {msg}")
             return False
 
-    # verifica torch importabile
-    rc = _stream([str(venv_python()), "-c",
-                  "import torch,demucs;print('torch',torch.__version__,'cuda',torch.cuda.is_available())"],
-                 log_cb, cancel)
-    if rc != 0:
-        log_cb("Verifica motore fallita.")
-        return False
+    # verifica torch importabile; se fallisce (es. torch corrotto, "WinError 127"
+    # su shm.dll), riprova UNA volta con reinstallazione pulita di torch — così
+    # «Reinstalla» ripara davvero una build rotta senza azzerare tutto a mano.
+    if not _verify_torch(log_cb, cancel):
+        if cancel():
+            log_cb("Annullato.")
+            return False
+        log_cb("Verifica fallita: reinstallo torch in modo pulito (build corrotta?)…")
+        if not _force_reinstall_torch(gpu, log_cb, cancel) or not _verify_torch(log_cb, cancel):
+            log_cb("Verifica motore fallita.")
+            return False
 
     _marker().write_text("ok", encoding="utf-8")
     progress_cb(100.0)
     log_cb("Motore stem pronto.")
     return True
+
+
+def _verify_torch(log_cb: LogCb, cancel: Cancel) -> bool:
+    """True se torch+demucs si importano correttamente nel venv."""
+    rc = _stream([str(venv_python()), "-c",
+                  "import torch,demucs;print('torch',torch.__version__,'cuda',torch.cuda.is_available())"],
+                 log_cb, cancel)
+    return rc == 0
+
+
+def _force_reinstall_torch(gpu: bool, log_cb: LogCb, cancel: Cancel) -> bool:
+    """Reinstalla torch+torchaudio da zero, ignorando la cache (wheel corrotta)."""
+    rc = _stream([str(venv_python()), "-m", "pip", "install",
+                  "torch", "torchaudio", "--index-url", _torch_index(gpu),
+                  "--force-reinstall", "--no-cache-dir"],
+                 log_cb, cancel)
+    return rc == 0
+
+
+# ---------------- disinstallazione motore ----------------
+
+def _rmtree_robust(path: Path, log_cb: LogCb | None = None) -> bool:
+    """Rimuove path in modo robusto su Windows (file read-only, junction di uv).
+
+    Ritorna True se al termine la cartella non esiste più.
+    """
+    if not path.exists():
+        return True
+
+    def _on_error(func, p, _exc):  # noqa: ANN001
+        # tipico: file di sola lettura nei wheel di torch → togli il flag e ritenta
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        shutil.rmtree(path, onerror=_on_error)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # fallback: rmdir di Windows gestisce bene le junction create da uv
+    if path.exists() and os.name == "nt":
+        try:
+            subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", str(path)],
+                           creationflags=_NO_WINDOW, timeout=120)
+        except Exception:  # noqa: BLE001
+            pass
+    ok = not path.exists()
+    if log_cb and not ok:
+        log_cb("Alcuni file sono in uso: chiudi l'app/processi del motore e riprova.")
+    return ok
+
+
+def uninstall_engine(log_cb: LogCb | None = None) -> bool:
+    """Rimuove completamente il motore stem (venv, torch, modelli, marker).
+
+    Dopo, `engine_ready()` torna False: una nuova installazione riparte pulita.
+    Utile quando la build di torch è corrotta o per liberare spazio (~3 GB).
+    """
+    edir = engine_dir()
+    if log_cb:
+        log_cb(f"Disinstallo il motore stem da: {edir}")
+    ok = _rmtree_robust(edir, log_cb)
+    if log_cb:
+        log_cb("Motore disinstallato." if ok else "Disinstallazione non completata.")
+    return ok
 
 
 # ---------------- separazione ----------------

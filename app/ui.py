@@ -130,6 +130,31 @@ def make_stem_thread(input_file: str, mode: str, out_format: str) -> tuple[QThre
     worker.finished.connect(thread.quit)
     return thread, worker
 
+
+class EngineUninstallWorker(QObject):
+    """Disinstalla il motore stem in un QThread (la rimozione di ~3 GB può
+    richiedere qualche secondo: evita di bloccare l'interfaccia)."""
+
+    log = Signal(str)
+    finished = Signal(bool)
+
+    def run(self) -> None:
+        try:
+            ok = stems.uninstall_engine(self.log.emit)
+        except Exception as exc:  # noqa: BLE001
+            self.log.emit(f"errore disinstallazione: {exc}")
+            ok = False
+        self.finished.emit(ok)
+
+
+def make_uninstall_thread() -> tuple[QThread, EngineUninstallWorker]:
+    thread = QThread()
+    worker = EngineUninstallWorker()
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    return thread, worker
+
 # Template nome file: etichetta leggibile -> pattern yt-dlp
 TEMPLATES: list[tuple[str, str]] = [
     ("Titolo", "%(title)s"),
@@ -372,6 +397,8 @@ class MainWindow(QWidget):
         self._appupd_progress: QProgressDialog | None = None
         self._stem_thread: QThread | None = None
         self._stem_worker: StemWorker | None = None
+        self._uninst_thread: QThread | None = None
+        self._uninst_worker: EngineUninstallWorker | None = None
         self._stem_row: QueueRow | None = None
         self._stem_batch: list[QueueItem] = []
         self._stem_cancel_batch = False
@@ -687,11 +714,19 @@ class MainWindow(QWidget):
         eng_row = QHBoxLayout()
         self.engine_lbl = QLabel("")
         self.engine_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
+        self.engine_opts_btn = QPushButton("Opzioni ▾")
+        self.engine_opts_btn.setObjectName("Ghost")
+        self.engine_opts_btn.setToolTip("Disinstalla il motore o cambia la cartella di installazione.")
+        eng_menu = QMenu(self.engine_opts_btn)
+        eng_menu.addAction("Disinstalla motore", self._on_uninstall_engine)
+        eng_menu.addAction("Cartella di installazione…", self._on_change_engine_location)
+        self.engine_opts_btn.setMenu(eng_menu)
         self.engine_btn = QPushButton("Installa motore")
         self.engine_btn.setObjectName("Ghost")
         self.engine_btn.setToolTip("Scarica/aggiorna il motore stem (Demucs + PyTorch, ~3GB).")
         self.engine_btn.clicked.connect(self._on_install_engine)
         eng_row.addWidget(self.engine_lbl, 1)
+        eng_row.addWidget(self.engine_opts_btn, 0)
         eng_row.addWidget(self.engine_btn, 0)
         oc.addLayout(eng_row)
 
@@ -1374,7 +1409,8 @@ class MainWindow(QWidget):
 
     def _busy(self) -> bool:
         return bool((self._thread and self._thread.isRunning())
-                    or (self._stem_thread and self._stem_thread.isRunning()))
+                    or (self._stem_thread and self._stem_thread.isRunning())
+                    or (self._uninst_thread and self._uninst_thread.isRunning()))
 
     def _on_separate_file_dialog(self) -> None:
         if self._busy():
@@ -1465,6 +1501,7 @@ class MainWindow(QWidget):
         self.stem_file_btn.setEnabled(not running)
         self.stem_all_btn.setEnabled(not running)
         self.engine_btn.setEnabled(not running)
+        self.engine_opts_btn.setEnabled(not running)
         self.clear_btn.setEnabled(not running)
         self.retry_btn.setEnabled(not running)
 
@@ -1531,8 +1568,11 @@ class MainWindow(QWidget):
 
     def _refresh_engine_label(self) -> None:
         ready = stems.engine_ready()
-        self.engine_lbl.setText("Motore stem: installato ✓" if ready
-                                else "Motore stem: non installato")
+        custom = (self.cfg.get("stem_engine_dir") or "").strip()
+        where = f" — {custom}" if custom else ""
+        self.engine_lbl.setText(("Motore stem: installato ✓" if ready
+                                 else "Motore stem: non installato") + where)
+        self.engine_lbl.setToolTip(f"Cartella motore: {stems.engine_dir()}")
         self.engine_btn.setText("Reinstalla motore" if ready else "Installa motore")
 
     def _on_install_engine(self) -> None:
@@ -1555,6 +1595,77 @@ class MainWindow(QWidget):
     def _on_engine_install_finished(self, ok: bool, _result: str) -> None:
         self._log("✔ motore stem pronto" if ok else "✖ installazione motore fallita")
         self._refresh_engine_label()
+
+    def _on_uninstall_engine(self) -> None:
+        if self._busy():
+            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            return
+        if not stems.engine_ready() and not stems.engine_dir().exists():
+            QMessageBox.information(self, "Motore stem", "Il motore non è installato.")
+            return
+        q = ("Disinstallare il motore stem?\n\n"
+             f"Verrà rimossa la cartella:\n{stems.engine_dir()}\n\n"
+             "Libera ~3 GB. Potrai reinstallarlo quando vuoi.")
+        if QMessageBox.question(self, "Disinstalla motore", q) != QMessageBox.StandardButton.Yes:
+            return
+        self._set_stem_running(True)
+        self.engine_btn.setEnabled(False)
+        self.engine_opts_btn.setEnabled(False)
+        self._log("— disinstallazione motore —")
+        self._uninst_thread, self._uninst_worker = make_uninstall_thread()
+        self._uninst_worker.log.connect(self._log)
+        self._uninst_worker.finished.connect(self._on_uninstall_finished)
+        self._uninst_thread.finished.connect(self._after_uninstall_thread)
+        self._uninst_thread.start()
+
+    def _on_uninstall_finished(self, ok: bool) -> None:
+        self._log("✔ motore disinstallato" if ok else "✖ disinstallazione non completata")
+        if not ok:
+            QMessageBox.warning(self, "Disinstalla motore",
+                                "Non è stato possibile rimuovere tutto.\n"
+                                "Chiudi eventuali processi del motore e riprova.")
+        self._refresh_engine_label()
+
+    def _after_uninstall_thread(self) -> None:
+        self._uninst_thread = None
+        self._uninst_worker = None
+        self.engine_btn.setEnabled(True)
+        self.engine_opts_btn.setEnabled(True)
+        self._set_stem_running(False)
+
+    def _on_change_engine_location(self) -> None:
+        if self._busy():
+            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            return
+        current = (self.cfg.get("stem_engine_dir") or "").strip()
+        start = current or str(config.config_dir())
+        d = QFileDialog.getExistingDirectory(
+            self, "Scegli dove installare il motore stem", start)
+        if not d:
+            return
+        old_dir = stems.engine_dir()
+        had_engine = stems.engine_ready()
+        # salva il nuovo percorso base
+        self.cfg["stem_engine_dir"] = d
+        self._persist()
+        new_dir = stems.engine_dir()
+        self._log(f"Cartella motore impostata su: {new_dir}")
+        self._refresh_engine_label()
+        # il motore vecchio (se c'era) resta dov'è: offri di rimuoverlo per liberare spazio
+        if had_engine and old_dir.exists() and old_dir != new_dir:
+            if QMessageBox.question(
+                self, "Motore esistente",
+                f"Un motore è già installato in:\n{old_dir}\n\n"
+                "Il nuovo percorso è vuoto: dovrai reinstallare il motore.\n"
+                "Vuoi rimuovere quello vecchio per liberare ~3 GB?"
+            ) == QMessageBox.StandardButton.Yes:
+                ok = stems._rmtree_robust(old_dir, self._log)
+                self._log("✔ vecchio motore rimosso" if ok
+                          else "✖ rimozione vecchio motore non completata")
+        if not stems.engine_ready():
+            QMessageBox.information(
+                self, "Motore stem",
+                "Percorso aggiornato. Premi «Installa motore» per installarlo nella nuova cartella.")
 
     # ---------- aggiornamento yt-dlp ----------
 

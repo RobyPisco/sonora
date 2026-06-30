@@ -217,10 +217,13 @@ def _managed_py312() -> Path | None:
     pydir = engine_dir() / "python"
     if not pydir.exists():
         return None
-    for d in sorted(pydir.glob("cpython-3.12.*"), reverse=True):
-        exe = d / "python.exe"
-        if exe.exists():
-            return exe
+    try:
+        for d in sorted(pydir.glob("cpython-3.12.*"), reverse=True):
+            exe = d / "python.exe"
+            if exe.exists():
+                return exe
+    except OSError:
+        pass
     return None
 
 
@@ -244,11 +247,14 @@ def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
     changed = False
     for ln in lines:
         if ln.split("=", 1)[0].strip().lower() == "home" and "=" in ln:
-            cur = Path(ln.split("=", 1)[1].strip())
-            real = Path(os.path.realpath(cur))
-            if real != cur and real.exists():
-                ln = f"home = {real}"
-                changed = True
+            try:
+                cur = Path(ln.split("=", 1)[1].strip())
+                real = Path(os.path.realpath(cur))
+                if real != cur and real.exists():
+                    ln = f"home = {real}"
+                    changed = True
+            except OSError:
+                pass  # Se realpath fallisce per la junction (errore 448), teniamo il percorso originale
         out.append(ln)
     if changed:
         try:

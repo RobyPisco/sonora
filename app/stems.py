@@ -93,14 +93,11 @@ def _repair_torch(log_cb: LogCb, cancel: Cancel) -> bool:
     risultato è torchaudio che non si carica (ABI) e niente CUDA. Qui si forza la
     coppia giusta (CUDA se c'è la GPU), versione allineata.
     """
-    uv = paths.uv_path()
-    if not uv:
-        return False
     gpu = has_nvidia()
     log_cb(f"Allineo torch/torchaudio ({'CUDA' if gpu else 'CPU'}, build coerente)…")
-    rc = _stream([uv, "pip", "install", "--python", str(venv_python()),
+    rc = _stream([str(venv_python()), "-m", "pip", "install",
                   "torch", "torchaudio", "--index-url", _torch_index(gpu),
-                  "--reinstall-package", "torch", "--reinstall-package", "torchaudio"],
+                  "--force-reinstall"],
                  log_cb, cancel)
     return rc == 0
 
@@ -113,15 +110,14 @@ def install_roformer(log_cb: LogCb, cancel: Cancel) -> bool:
     """
     if roformer_ready():
         return True
-    uv = paths.uv_path()
-    if not uv or not venv_python().exists():
+    if not venv_python().exists():
         log_cb("Errore: motore base non pronto.")
         return False
     gpu = has_nvidia()
     pkg = "audio-separator[gpu]" if gpu else "audio-separator[cpu]"
     log_cb(f"Installo Roformer (audio-separator, {'GPU' if gpu else 'CPU'})… "
            "può richiedere alcuni minuti.")
-    rc = _stream([uv, "pip", "install", "--python", str(venv_python()), pkg],
+    rc = _stream([str(venv_python()), "-m", "pip", "install", pkg],
                  log_cb, cancel)
     if rc == -1:
         log_cb("Annullato.")
@@ -264,30 +260,34 @@ def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
     return changed
 
 
-def _remove_uv_alias_junctions(edir: Path, log_cb: LogCb | None = None) -> bool:
-    """Elimina la junction alias minor-version di uv (`cpython-3.12-...`).
-
-    La causa reale dell'errore 448 non è il riferimento in pyvenv.cfg, ma il
-    fatto che uv (con la mitigazione «redirection trust» attiva) *elenca* la
-    cartella `python/` durante l'ispezione del venv e, incontrando quella
-    junction, rifiuta di attraversarla → «untrusted mount point». Il Python
-    concreto (`cpython-3.12.NN-...`) resta: rimuovere solo il link basta.
-    Ritorna True se ha rimosso almeno una junction.
-    """
-    pydir = edir / "python"
-    if not pydir.exists():
+def _check_venv_python_works() -> bool:
+    """Verifica se l'eseguibile Python del venv si avvia correttamente."""
+    try:
+        r = subprocess.run([str(venv_python()), "-V"], capture_output=True,
+                           creationflags=_NO_WINDOW, timeout=5)
+        return r.returncode == 0
+    except Exception:
         return False
-    removed = False
-    for d in pydir.glob("cpython-3.12-*"):   # NON intercetta `cpython-3.12.NN-...`
-        try:
-            if os.path.isjunction(str(d)):
-                os.rmdir(str(d))             # rimuove la junction, non il target
-                removed = True
-        except OSError:
-            pass
-    if removed and log_cb:
-        log_cb("Rimuovo la junction Python di uv (causa dell'errore 448).")
-    return removed
+
+
+def _has_pip() -> bool:
+    """Verifica se pip è installato nel venv."""
+    try:
+        r = subprocess.run([str(venv_python()), "-m", "pip", "--version"],
+                           capture_output=True, creationflags=_NO_WINDOW, timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _seed_pip(log_cb: LogCb, cancel: Cancel) -> bool:
+    """Semina pip nel venv usando ensurepip."""
+    log_cb("Semino pip nel venv (ensurepip)…")
+    rc = _stream([str(venv_python()), "-m", "ensurepip", "--upgrade"], log_cb, cancel)
+    if rc != 0:
+        log_cb(f"Semina di pip fallita (codice {rc}).")
+        return False
+    return True
 
 
 def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
@@ -310,8 +310,7 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
             return False
         if rc == 0 and venv_python().exists():
             _normalize_pyvenv_home(venv, log_cb)
-            _remove_uv_alias_junctions(venv.parent, log_cb)
-            return True
+            return _seed_pip(log_cb, cancel)
         exe = _managed_py312()   # il download del Python è comunque avvenuto?
     if exe is None:
         log_cb("Python 3.12 non disponibile dopo il download.")
@@ -324,8 +323,7 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
         return False
     if rc == 0 and venv_python().exists():
         _normalize_pyvenv_home(venv, log_cb)
-        _remove_uv_alias_junctions(venv.parent, log_cb)
-        return True
+        return _seed_pip(log_cb, cancel)
     return False
 
 
@@ -347,7 +345,7 @@ def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
     torch_index = _torch_index(gpu)
     log_cb(f"GPU NVIDIA: {'sì (CUDA)' if gpu else 'no (CPU)'}")
 
-    if not venv_python().exists():
+    if not venv_python().exists() or not _check_venv_python_works():
         log_cb("Creo l'ambiente Python 3.12…")
         if not _create_venv(uv, venv, log_cb, cancel):
             if not cancel():
@@ -356,21 +354,22 @@ def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
                 log_cb("Annullato.")
             return False
 
-    # Ripara/previene l'errore 448 ad ogni avvio (idempotente, anche su venv già
-    # creati da versioni precedenti): normalizza il riferimento al Python ed
-    # elimina la junction alias di uv che uv non riesce ad attraversare.
+    # Ripara/previene l'errore 448 ad ogni avvio (idempotente): normalizza il riferimento al Python
     _normalize_pyvenv_home(venv, log_cb)
-    _remove_uv_alias_junctions(edir, log_cb)
+
+    if not _has_pip():
+        if not _seed_pip(log_cb, cancel):
+            return False
 
     steps: list[tuple[str, list[str]]] = []
     steps.append((f"Installo PyTorch ({'CUDA' if gpu else 'CPU'}) — può richiedere alcuni minuti…",
-                  [uv, "pip", "install", "--python", str(venv_python()),
+                  [str(venv_python()), "-m", "pip", "install",
                    "torch", "torchaudio", "--index-url", torch_index]))
     steps.append(("Installo Demucs…",
-                  [uv, "pip", "install", "--python", str(venv_python()),
+                  [str(venv_python()), "-m", "pip", "install",
                    "demucs", "soundfile"]))
     steps.append(("Installo l'analisi (librosa)…",
-                  [uv, "pip", "install", "--python", str(venv_python()),
+                  [str(venv_python()), "-m", "pip", "install",
                    "librosa", "pyloudnorm"]))
 
     total = len(steps)

@@ -228,6 +228,42 @@ def _managed_py312() -> Path | None:
     return None
 
 
+def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
+    """Riscrive `home` in pyvenv.cfg alla cartella REALE del Python 3.12.
+
+    uv crea un alias minor-version come *junction* (`cpython-3.12-...` →
+    `cpython-3.12.NN-...`). Con la mitigazione «redirection trust» di uv quella
+    junction non è attraversabile e l'ispezione del venv fallisce con
+    «untrusted mount point» (os error 448). Puntando `home` alla cartella reale
+    si elimina la junction dal percorso. Ritorna True se ha modificato il file.
+    """
+    cfg = venv / "pyvenv.cfg"
+    if not cfg.exists():
+        return False
+    try:
+        lines = cfg.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    out: list[str] = []
+    changed = False
+    for ln in lines:
+        if ln.split("=", 1)[0].strip().lower() == "home" and "=" in ln:
+            cur = Path(ln.split("=", 1)[1].strip())
+            real = Path(os.path.realpath(cur))
+            if real != cur and real.exists():
+                ln = f"home = {real}"
+                changed = True
+        out.append(ln)
+    if changed:
+        try:
+            cfg.write_text("\n".join(out) + "\n", encoding="utf-8")
+            if log_cb:
+                log_cb("Normalizzo il riferimento al Python (evito la junction → errore 448).")
+        except OSError:
+            return False
+    return changed
+
+
 def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
     """Crea il venv 3.12, robusto al fallimento del link minor-version di uv.
 
@@ -247,6 +283,7 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
         if rc == -1:
             return False
         if rc == 0 and venv_python().exists():
+            _normalize_pyvenv_home(venv, log_cb)
             return True
         exe = _managed_py312()   # il download del Python è comunque avvenuto?
     if exe is None:
@@ -258,7 +295,10 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
     rc = _stream([uv, "venv", str(venv), "--python", str(exe)], log_cb, cancel)
     if rc == -1:
         return False
-    return rc == 0 and venv_python().exists()
+    if rc == 0 and venv_python().exists():
+        _normalize_pyvenv_home(venv, log_cb)
+        return True
+    return False
 
 
 def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
@@ -287,6 +327,10 @@ def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
             else:
                 log_cb("Annullato.")
             return False
+    else:
+        # Venv già presente da una versione precedente: ripara il riferimento al
+        # Python se punta alla junction di uv (altrimenti uv pip → errore 448).
+        _normalize_pyvenv_home(venv, log_cb)
 
     steps: list[tuple[str, list[str]]] = []
     steps.append((f"Installo PyTorch ({'CUDA' if gpu else 'CPU'}) — può richiedere alcuni minuti…",

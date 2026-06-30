@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.5.8** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.6.2** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -25,6 +25,15 @@ Versione corrente: **1.5.8** (allineata in `app/__init__.py`, `installer/sonora.
   - **6hq** (ensemble Demucs htdemucs_ft+htdemucs_6s), **6**, **4**, **2** (Demucs)
   - Output wav/flac/mp3. "Separa tutti" (salta i già separati).
   - **Auto-analisi a fine separazione**: calcolo immediato di BPM, key e beat grid.
+  - **Gestione motore** (menu "Opzioni ▾" accanto a Installa motore):
+    - **Verifica / Ripara motore**: diagnostica e ripara solo il necessario (se torch non
+      si carica reinstalla il solo torch ~2.5 GB; se il venv è rotto reinstalla tutto).
+    - **Disinstalla motore**: rimozione robusta (file read-only + junction uv), libera ~3 GB.
+    - **Cartella di installazione**: scegli dove installare il motore (config `stem_engine_dir`;
+      es. su un altro disco). Offre di rimuovere il vecchio motore per liberare spazio.
+    - Il venv 3.12 si crea con lo **stdlib `venv`** del Python scaricato da uv (niente trampolino
+      uv → niente os error 2/448 sui sistemi con "redirection trust"). Installazione idempotente
+      con auto-riparazione di torch corrotto (WinError 127).
 - **Mixer / studio di pratica** (scheda integrata):
   - play sincronizzato, **volume/mute/solo/pan** per traccia, **EQ a 3 bande** (Bassi/Medi/Alti) per traccia.
   - **Waveform premium**: stile rounded a barre verticali discrete con sfumatura gradiente e indicazione visiva dello stato di riproduzione (colorate a sinistra del playhead, grigie/semi-trasparenti a destra).
@@ -54,8 +63,9 @@ Versione corrente: **1.5.8** (allineata in `app/__init__.py`, `installer/sonora.
 ## Architettura chiave
 - Main app gira su **Python 3.14** (PyInstaller onedir → `dist/Sonora/Sonora.exe`).
 - **Motore stem isolato**: PyTorch non ha CUDA su 3.14 → venv **Python 3.12 + torch cu124 + demucs +
-  audio-separator + librosa + pyloudnorm** in `%APPDATA%/Sonora/stem-engine/`, creato con `bin/uv.exe`,
-  richiamato come subprocess. GPU: RTX 3060 6GB.
+  audio-separator + librosa + pyloudnorm**, di default in `%APPDATA%/Sonora/stem-engine/` (cartella
+  personalizzabile via `stem_engine_dir`). uv (`bin/uv.exe`) scarica solo il Python 3.12; il venv si
+  crea con lo stdlib `venv` (niente trampolino uv). Richiamato come subprocess. GPU: RTX 3060 6GB.
 - Analisi (BPM/key) gira nel venv 3.12 via `app/analyze_script.py` → scrive `<stems>/analysis.json`.
 - Roformer gira nel venv 3.12 via `app/roformer_script.py` (audio-separator).
 - Playback/Mix: **numpy + sounddevice + soundfile** nel main app (mix realtime, sync campione-esatto).
@@ -80,13 +90,17 @@ Versione corrente: **1.5.8** (allineata in `app/__init__.py`, `installer/sonora.
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`
-- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.8.exe`
+- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.6.2.exe`
 
 ## DA FARE (idee proposte, scelta utente)
-- **Rubberband in CI (opzionale)**: senza, le build CI usano il fallback numpy (time-stretch meno fine).
-  Per includerlo: `pwsh tools/make-bin-zip.ps1` + carica `rubberband-win64.zip` nella release `deps`.
 - **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto" (anche durante
-  l'auto-update). Certificato OV ~100-400€/anno.
+  l'auto-update). Certificato OV ~100-400€/anno. (Rimandato: nessuna firma per ora.)
+
+## Fatto di recente
+- **Rubberband nelle build CI**: caricato `rubberband-win64.zip` nella release `deps` → la CI lo include
+  automaticamente (le build dalla 1.6.2 in poi usano Rubberband R3, non il fallback numpy).
+- **Gestione motore stem** (1.6.0→1.6.2): Verifica/Ripara, Disinstalla, Cartella personalizzata,
+  fix creazione venv (stdlib venv, niente trampolino uv), auto-riparazione torch.
 
 ## Note
 - **Log**: `%APPDATA%/Sonora/sonora.log` (rotante, 1MB×4) — crash non gestiti (excepthook),

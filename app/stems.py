@@ -511,6 +511,58 @@ def uninstall_engine(log_cb: LogCb | None = None) -> bool:
     return ok
 
 
+# ---------------- verifica / riparazione motore ----------------
+
+def repair_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
+    """Diagnostica il motore e ripara solo ciò che serve. Ritorna True se a posto.
+
+    Scala dall'intervento più leggero al più pesante:
+    1. venv assente / Python che non parte / pip mancante → installazione completa.
+    2. torch non importabile (es. WinError 127 su shm.dll) → reinstallazione pulita
+       del solo torch (~2.5 GB) senza riscaricare tutto il resto.
+    3. tutto ok → riscrive solo il marker `engine.ok`.
+    Evita di riscaricare i ~3 GB quando basta molto meno.
+    """
+    if not venv_python().exists():
+        log_cb("Motore non installato: eseguo l'installazione completa…")
+        return install_engine(log_cb, progress_cb, cancel)
+
+    progress_cb(10.0)
+    if not _check_venv_python_works():
+        log_cb("Il Python del venv non si avvia: reinstallo il motore…")
+        return install_engine(log_cb, progress_cb, cancel)
+
+    if not _has_pip():
+        log_cb("pip mancante nel venv: completo l'installazione…")
+        return install_engine(log_cb, progress_cb, cancel)
+
+    progress_cb(40.0)
+    log_cb("Verifico l'import di torch e demucs…")
+    if _verify_torch(log_cb, cancel):
+        _marker().write_text("ok", encoding="utf-8")
+        progress_cb(100.0)
+        log_cb("Motore verificato: tutto a posto. ✓")
+        return True
+    if cancel():
+        log_cb("Annullato.")
+        return False
+
+    log_cb("torch non si carica: reinstallazione pulita di torch…")
+    progress_cb(60.0)
+    gpu = has_nvidia()
+    if _force_reinstall_torch(gpu, log_cb, cancel) and _verify_torch(log_cb, cancel):
+        _marker().write_text("ok", encoding="utf-8")
+        progress_cb(100.0)
+        log_cb("Motore riparato. ✓")
+        return True
+    if cancel():
+        log_cb("Annullato.")
+        return False
+
+    log_cb("Riparazione di torch non riuscita: provo l'installazione completa…")
+    return install_engine(log_cb, progress_cb, cancel)
+
+
 # ---------------- separazione ----------------
 
 _PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")

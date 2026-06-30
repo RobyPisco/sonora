@@ -155,6 +155,39 @@ def make_uninstall_thread() -> tuple[QThread, EngineUninstallWorker]:
     worker.finished.connect(thread.quit)
     return thread, worker
 
+
+class EngineVerifyWorker(QObject):
+    """Verifica e ripara il motore stem in un QThread (reinstalla solo il necessario)."""
+
+    progress = Signal(float)
+    log = Signal(str)
+    finished = Signal(bool)
+
+    def __init__(self):
+        super().__init__()
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            ok = stems.repair_engine(self.log.emit, self.progress.emit,
+                                     lambda: self._cancel)
+        except Exception as exc:  # noqa: BLE001
+            self.log.emit(f"errore verifica motore: {exc}")
+            ok = False
+        self.finished.emit(ok)
+
+
+def make_verify_thread() -> tuple[QThread, EngineVerifyWorker]:
+    thread = QThread()
+    worker = EngineVerifyWorker()
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    return thread, worker
+
 # Template nome file: etichetta leggibile -> pattern yt-dlp
 TEMPLATES: list[tuple[str, str]] = [
     ("Titolo", "%(title)s"),
@@ -399,6 +432,8 @@ class MainWindow(QWidget):
         self._stem_worker: StemWorker | None = None
         self._uninst_thread: QThread | None = None
         self._uninst_worker: EngineUninstallWorker | None = None
+        self._verify_thread: QThread | None = None
+        self._verify_worker: EngineVerifyWorker | None = None
         self._stem_row: QueueRow | None = None
         self._stem_batch: list[QueueItem] = []
         self._stem_cancel_batch = False
@@ -718,6 +753,8 @@ class MainWindow(QWidget):
         self.engine_opts_btn.setObjectName("Ghost")
         self.engine_opts_btn.setToolTip("Disinstalla il motore o cambia la cartella di installazione.")
         eng_menu = QMenu(self.engine_opts_btn)
+        eng_menu.addAction("Verifica / Ripara motore", self._on_verify_engine)
+        eng_menu.addSeparator()
         eng_menu.addAction("Disinstalla motore", self._on_uninstall_engine)
         eng_menu.addAction("Cartella di installazione…", self._on_change_engine_location)
         self.engine_opts_btn.setMenu(eng_menu)
@@ -1410,7 +1447,8 @@ class MainWindow(QWidget):
     def _busy(self) -> bool:
         return bool((self._thread and self._thread.isRunning())
                     or (self._stem_thread and self._stem_thread.isRunning())
-                    or (self._uninst_thread and self._uninst_thread.isRunning()))
+                    or (self._uninst_thread and self._uninst_thread.isRunning())
+                    or (self._verify_thread and self._verify_thread.isRunning()))
 
     def _on_separate_file_dialog(self) -> None:
         if self._busy():
@@ -1631,6 +1669,40 @@ class MainWindow(QWidget):
         self._uninst_worker = None
         self.engine_btn.setEnabled(True)
         self.engine_opts_btn.setEnabled(True)
+        self._set_stem_running(False)
+
+    def _on_verify_engine(self) -> None:
+        if self._busy():
+            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            return
+        if not stems.venv_python().exists():
+            QMessageBox.information(
+                self, "Motore stem",
+                "Il motore non è installato. Premi «Installa motore».")
+            return
+        self._set_stem_running(True)
+        self._stem_row = None
+        self._log("— verifica / riparazione motore —")
+        self._verify_thread, self._verify_worker = make_verify_thread()
+        self._verify_worker.progress.connect(self._on_stem_progress)
+        self._verify_worker.log.connect(self._log)
+        self._verify_worker.finished.connect(self._on_verify_finished)
+        self._verify_thread.finished.connect(self._after_verify_thread)
+        self._verify_thread.start()
+
+    def _on_verify_finished(self, ok: bool) -> None:
+        self._log("✔ motore verificato/riparato" if ok else "✖ verifica motore fallita")
+        self._refresh_engine_label()
+        if ok:
+            QMessageBox.information(self, "Motore stem", "Il motore è a posto e pronto all'uso. ✓")
+        else:
+            QMessageBox.warning(self, "Motore stem",
+                                "Verifica/riparazione non riuscita. Controlla il log; "
+                                "in alternativa disinstalla e reinstalla il motore.")
+
+    def _after_verify_thread(self) -> None:
+        self._verify_thread = None
+        self._verify_worker = None
         self._set_stem_running(False)
 
     def _on_change_engine_location(self) -> None:

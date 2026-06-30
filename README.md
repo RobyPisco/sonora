@@ -2,7 +2,7 @@
 
 **Italiano** · [English](#english)
 
-![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.5.8-orange)
+![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.6.2-orange)
 
 App desktop Windows per **scaricare audio da YouTube**, **separarlo in stem** e **esercitarsi** sui brani con un mixer di pratica, visualizzatore di testi e un accordatore. Tutto in locale.
 
@@ -65,10 +65,12 @@ Output: `dist/Sonora/Sonora.exe` (distribuisci l'intera cartella `dist/Sonora/`)
 1. Installa [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Fai la build PyInstaller (sopra).
 3. Compila: `ISCC.exe installer\sonora.iss`
-4. Output: `dist_installer\SonoraSetup-1.5.8.exe`
+4. Output: `dist_installer\SonoraSetup-1.6.2.exe`
 
 ## Motore stem (isolato)
 PyTorch non ha wheel CUDA per Python 3.14, quindi al primo uso Sonora crea un motore isolato (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. Download una-tantum **~3 GB**. Su PC senza GPU usa la CPU (più lento). I modelli Roformer (~centinaia di MB) si scaricano al primo uso in `%APPDATA%/Sonora/separator-models/`.
+
+Dal menu **Opzioni ▾** (accanto a "Installa motore") puoi **Verificare/Riparare** il motore (reinstalla solo ciò che serve), **Disinstallarlo** (libera ~3 GB) o **cambiare la cartella di installazione** (es. su un altro disco). Il venv 3.12 viene creato con lo stdlib `venv` del Python scaricato, così l'installazione è robusta anche su sistemi dove uv non può creare i link interni.
 
 ## Struttura
 ```
@@ -161,10 +163,12 @@ Output: `dist/Sonora/Sonora.exe` (ship the whole `dist/Sonora/` folder).
 ## Installer (optional)
 1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Run the PyInstaller build (above).
-3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.5.8.exe`.
+3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.6.2.exe`.
 
 ## Stem engine (isolated)
 PyTorch has no CUDA wheel for Python 3.14, so on first use Sonora builds an isolated engine (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. One-time **~3 GB** download. Falls back to CPU without a GPU. Roformer models download on first use to `%APPDATA%/Sonora/separator-models/`.
+
+From the **Options ▾** menu (next to "Install engine") you can **Verify/Repair** the engine (reinstalls only what's needed), **Uninstall** it (frees ~3 GB) or **change the install folder** (e.g. another drive). The 3.12 venv is created with the downloaded Python's stdlib `venv`, so installation is robust even on systems where uv can't create its internal links.
 
 ## Notes
 - **Update yt-dlp** regularly: YouTube changes often.

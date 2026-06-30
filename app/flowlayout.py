@@ -51,7 +51,17 @@ class FlowLayout(QLayout):
         self._do_layout(rect, False)
 
     def sizeHint(self) -> QSize:
-        return self.minimumSize()
+        # dimensione "naturale" su una sola riga: somma le larghezze. Serve
+        # quando il FlowLayout sta dentro un layout orizzontale (es. le card
+        # accanto al titolo): così occupa la riga intera se c'è spazio e va a
+        # capo solo quando viene compresso sotto la sua minimumSize.
+        w, h = 0, 0
+        for i, item in enumerate(self._items):
+            s = item.sizeHint()
+            w += s.width() + (self._hspace if i else 0)
+            h = max(h, s.height())
+        m = self.contentsMargins()
+        return QSize(w + m.left() + m.right(), h + m.top() + m.bottom())
 
     def minimumSize(self) -> QSize:
         size = QSize()

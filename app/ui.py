@@ -441,8 +441,15 @@ class MainWindow(QWidget):
         self.lyrics_tab = LyricsTab(self)
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
         self.tabs.addTab(dl_tab, "Scarica")
-        self.tabs.addTab(self.mixer_tab, "Mixer")
+        self._mixer_index = self.tabs.addTab(self.mixer_tab, "Mixer")
         self.tabs.addTab(self.lyrics_tab, "Testi")
+
+        # azioni del mixer (Accordatore/Esporta/Analizza/Recenti) sulla barra
+        # schede, a destra; visibili solo quando la scheda Mixer è attiva.
+        self.tabs.setCornerWidget(self.mixer_tab.actions_host,
+                                  Qt.Corner.TopRightCorner)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._on_tab_changed(self.tabs.currentIndex())
 
         page = QVBoxLayout(dl_tab)
         page.setContentsMargins(0, 0, 0, 0)
@@ -1096,6 +1103,10 @@ class MainWindow(QWidget):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Mostra le azioni del mixer solo sulla scheda Mixer."""
+        self.mixer_tab.actions_host.setVisible(index == self._mixer_index)
 
     def _show_about(self) -> None:
         box = QMessageBox(self)

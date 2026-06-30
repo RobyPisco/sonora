@@ -61,6 +61,22 @@ STEM_LABEL = {"vocals": "Vocals", "drums": "Drums", "bass": "Bass",
 STEM_NO = {"vocals": "NO_VOCE", "drums": "NO_BATTERIA", "bass": "NO_BASSO",
            "guitar": "NO_CHITARRA", "piano": "NO_PIANO", "other": "NO_ALTRO"}
 
+# Larghezza fissa del pannello controlli di ogni traccia. Condivisa fra
+# TrackStrip e TimelineWidget così le waveform partono alla stessa x e
+# restano allineate ai tick della timeline. Cambiala in un solo punto.
+CTRL_W = 280
+
+
+def _fader_qss(color: str) -> str:
+    """Stylesheet per un fader volume con la parte riempita del colore dello stem."""
+    return (
+        "QSlider::groove:horizontal{height:4px;background:#2a2e3a;border-radius:2px;}"
+        f"QSlider::sub-page:horizontal{{background:{color};border-radius:2px;}}"
+        "QSlider::handle:horizontal{background:#f3f4f8;width:13px;height:13px;"
+        "margin:-5px 0;border-radius:6px;}"
+        "QSlider::handle:horizontal:hover{background:#ffffff;}"
+    )
+
 
 def _fmt_time(sec: float) -> str:
     sec = max(0, int(sec))
@@ -217,15 +233,17 @@ def _hgroup(*widgets, spacing: int = 6) -> QWidget:
 
 
 def _card(title: str, value: str, color: str = "#e6e8ee") -> tuple[QFrame, QLabel]:
+    """Card di analisi compatta (etichetta minuscola in alto, valore sotto)."""
     f = QFrame()
-    f.setObjectName("Card")
+    f.setObjectName("StatCard")
     lay = QVBoxLayout(f)
-    lay.setContentsMargins(14, 10, 14, 10)
-    lay.setSpacing(2)
+    lay.setContentsMargins(12, 7, 12, 7)
+    lay.setSpacing(1)
     t = QLabel(title)
-    t.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:600;")
+    t.setStyleSheet("color:#8b90a0; font-size:9px; font-weight:700;"
+                    " letter-spacing:1px;")
     v = QLabel(value)
-    v.setStyleSheet(f"color:{color}; font-size:20px; font-weight:700;")
+    v.setStyleSheet(f"color:{color}; font-size:17px; font-weight:800;")
     lay.addWidget(t)
     lay.addWidget(v)
     return f, v
@@ -267,21 +285,21 @@ class TimelineWidget(QWidget):
 
     def _x_of(self, fr: float) -> int:
         w = self.width()
-        w_timeline = w - 356
+        w_timeline = w - CTRL_W
         if w_timeline <= 0:
             return 0
-        return int(356 + (fr - self._view_start) / self._span() * w_timeline)
+        return int(CTRL_W + (fr - self._view_start) / self._span() * w_timeline)
 
     def _frac(self, x: float) -> float:
         w = self.width()
-        w_timeline = w - 356
+        w_timeline = w - CTRL_W
         if w_timeline <= 0:
             return 0.0
-        gf = self._view_start + ((x - 356) / w_timeline) * self._span()
+        gf = self._view_start + ((x - CTRL_W) / w_timeline) * self._span()
         return max(0.0, min(1.0, gf))
 
     def _emit_seek(self, x: float) -> None:
-        if x >= 356:
+        if x >= CTRL_W:
             self.seeked.emit(self._frac(x))
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
@@ -298,18 +316,19 @@ class TimelineWidget(QWidget):
         w, h = self.width(), self.height()
         mid = h / 2.0
 
-        # Background
-        p.fillRect(self.rect(), QColor("#10121a"))
+        # Background: pannello sinistro come le strisce, area destra come le waveform
+        p.fillRect(0, 0, CTRL_W, h, QColor("#12141b"))
+        p.fillRect(CTRL_W, 0, w - CTRL_W, h, QColor("#10121a"))
 
         # Bordo inferiore e separatore sinistro
         p.setPen(QPen(QColor("#1e2230"), 1))
         p.drawLine(0, h - 1, w, h - 1)
-        p.drawLine(356, 0, 356, h)
+        p.drawLine(CTRL_W, 0, CTRL_W, h)
 
-        # Label nel pannello sinistro
+        # Label nel pannello sinistro (allineata ai nomi traccia)
         p.setPen(QPen(QColor("#8b90a0"), 1))
         p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        p.drawText(14, int(mid + 5), "TIMELINE")
+        p.drawText(16, int(mid + 5), "TIMELINE")
 
         span = self._span()
         vs = self._view_start
@@ -322,7 +341,7 @@ class TimelineWidget(QWidget):
         if self._beats and self._duration > 0:
             n_beats = len(self._beats)
             beat_interval_sec = self._duration / max(1, n_beats)
-            beat_spacing_px = (w - 356) * (beat_interval_sec / self._duration) / span
+            beat_spacing_px = (w - CTRL_W) * (beat_interval_sec / self._duration) / span
 
             decimation = 1
             show_ticks = True
@@ -394,7 +413,7 @@ class TimelineWidget(QWidget):
 
         # playhead
         px = self._x_of(self._progress)
-        if 356 <= px <= w:
+        if CTRL_W <= px <= w:
             p.setPen(QPen(QColor("#ffffff"), 1.5))
             p.drawLine(px, 0, px, h)
             
@@ -423,31 +442,49 @@ class TrackStrip(QWidget):
         color = STEM_COLORS.get(name, "#ff3b5c")
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 4, 0, 4)
-        row.setSpacing(10)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
 
-        # pannello controlli sinistra (larghezza fissa per allineare le waveform)
-        ctrl = QWidget()
-        ctrl.setFixedWidth(356)
-        cl = QHBoxLayout(ctrl)
-        cl.setContentsMargins(0, 0, 0, 0)
+        # pannello controlli sinistra (larghezza fissa per allineare le waveform):
+        # 3 righe → nome+dB / fader volume / pan + EQ/M/S
+        ctrl = QFrame()
+        ctrl.setObjectName("StripPanel")
+        ctrl.setFixedWidth(CTRL_W)
+        cl = QVBoxLayout(ctrl)
+        cl.setContentsMargins(16, 12, 16, 12)
         cl.setSpacing(8)
+
+        # riga 1: nome traccia (colorato) + valore dB a destra
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(6)
         name_lbl = QLabel(STEM_LABEL.get(name, name.title()))
-        name_lbl.setFixedWidth(58)
-        name_lbl.setStyleSheet(f"color:{color}; font-weight:700;")
+        name_lbl.setStyleSheet(f"color:{color}; font-weight:700; font-size:15px;")
+        self.db_lbl = QLabel("0.0 dB")
+        self.db_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        head.addWidget(name_lbl)
+        head.addStretch(1)
+        head.addWidget(self.db_lbl)
+        cl.addLayout(head)
+
+        # riga 2: fader volume a tutta larghezza, riempito col colore dello stem
         self.fader = QSlider(Qt.Orientation.Horizontal)
         self.fader.setRange(-40, 6)
         self.fader.setValue(0)
+        self.fader.setStyleSheet(_fader_qss(color))
         self.fader.valueChanged.connect(self._on_gain)
         self.fader.sliderReleased.connect(self._notify)
-        self.db_lbl = QLabel("0.0")
-        self.db_lbl.setFixedWidth(34)
-        self.db_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        cl.addWidget(self.fader)
+
+        # riga 3: pan (corto, a sinistra) + EQ / M / S (a destra)
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 0, 0, 0)
+        foot.setSpacing(6)
         # pan: -100 (L) .. +100 (R), doppio click per ricentrare
         self.pan = QSlider(Qt.Orientation.Horizontal)
         self.pan.setRange(-100, 100)
         self.pan.setValue(0)
-        self.pan.setFixedWidth(56)
+        self.pan.setFixedWidth(96)
         self.pan.setToolTip("Pan (doppio click: centro)")
         self.pan.valueChanged.connect(self._on_pan)
         self.pan.sliderReleased.connect(self._notify)
@@ -456,7 +493,7 @@ class TrackStrip(QWidget):
         self.s_btn = QPushButton("S")
         for b in (self.m_btn, self.s_btn):
             b.setCheckable(True)
-            b.setFixedWidth(32)
+            b.setFixedWidth(30)
             b.setObjectName("GhostMini")
         self.m_btn.toggled.connect(self._on_mute)
         self.s_btn.toggled.connect(self._on_solo)
@@ -467,16 +504,17 @@ class TrackStrip(QWidget):
         self.eq_btn.setToolTip("Equalizzatore 3 bande (Bassi / Medi / Alti)")
         self.eq_btn.clicked.connect(self._show_eq)
         self._eq = {"low": 0, "mid": 0, "high": 0}   # dB correnti
-        cl.addWidget(name_lbl)
-        cl.addWidget(self.fader, 1)
-        cl.addWidget(self.db_lbl)
-        cl.addWidget(self.pan)
-        cl.addWidget(self.eq_btn)
-        cl.addWidget(self.m_btn)
-        cl.addWidget(self.s_btn)
+        foot.addWidget(self.pan)
+        foot.addStretch(1)
+        foot.addWidget(self.eq_btn)
+        foot.addWidget(self.m_btn)
+        foot.addWidget(self.s_btn)
+        cl.addLayout(foot)
+
         row.addWidget(ctrl, 0)
 
         self.wave = WaveformWidget(color)
+        self.wave.setMinimumHeight(96)
         row.addWidget(self.wave, 1)
 
     def _notify(self) -> None:
@@ -485,7 +523,7 @@ class TrackStrip(QWidget):
 
     def _on_gain(self, v: int) -> None:
         self.engine.set_gain(self.index, float(v))
-        self.db_lbl.setText(f"{v:.1f}")
+        self.db_lbl.setText(f"{v:.1f} dB")
 
     def _on_pan(self, v: int) -> None:
         self.engine.set_pan(self.index, v / 100.0)
@@ -578,7 +616,7 @@ class TrackStrip(QWidget):
         self.fader.blockSignals(True)
         self.fader.setValue(gain)
         self.fader.blockSignals(False)
-        self.db_lbl.setText(f"{gain:.1f}")
+        self.db_lbl.setText(f"{gain:.1f} dB")
         self.engine.set_gain(self.index, float(gain))
 
         pan = int(round(float(st.get("pan", 0.0)) * 100))
@@ -672,19 +710,19 @@ class MixerTab(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # barra superiore: carica + analizza
-        top = QHBoxLayout()
-        self.title_lbl = QLabel("Nessuno stem caricato")
-        self.title_lbl.setStyleSheet("font-size:16px; font-weight:700;")
-        load_btn = QPushButton("Carica cartella stem…")
-        load_btn.setObjectName("Ghost")
-        load_btn.clicked.connect(self._on_load_dialog)
+        # ===== contenuto principale (margini interni) =====
+        body = QVBoxLayout()
+        body.setContentsMargins(18, 14, 18, 8)
+        body.setSpacing(10)
+
+        # --- bottoni azione (Accordatore / Esporta / Analizza / Recenti):
+        #     montati da MainWindow come corner widget della barra schede ---
         self.recent_btn = QPushButton("Recenti ▾")
         self.recent_btn.setObjectName("Ghost")
-        self.recent_btn.setToolTip("Riapri stem già separati con un clic.")
+        self.recent_btn.setToolTip("Apri / riapri una cartella di stem.")
         self.recent_btn.clicked.connect(self._show_recent_menu)
         self.analyze_btn = QPushButton("Analizza")
         self.analyze_btn.setObjectName("Ghost")
@@ -700,106 +738,113 @@ class MixerTab(QWidget):
         self.tuner_btn.setObjectName("Ghost")
         self.tuner_btn.setToolTip("Accordatore: tono di riferimento A440 / corde + accordatore dal microfono.")
         self.tuner_btn.clicked.connect(self._open_tuner)
-        # il titolo può restringersi; i bottoni vanno a capo da soli se serve
-        self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        btns_host = QWidget()
-        btns_flow = FlowLayout(btns_host, hspacing=6, vspacing=6)
-        for b in (self.tuner_btn, self.export_btn, self.analyze_btn,
-                  self.recent_btn, load_btn):
-            btns_flow.addWidget(b)
-        top.addWidget(self.title_lbl, 1)
-        top.addWidget(btns_host)
-        root.addLayout(top)
+        self.actions_host = QWidget()
+        ah = QHBoxLayout(self.actions_host)
+        ah.setContentsMargins(0, 0, 12, 0)
+        ah.setSpacing(6)
+        for b in (self.tuner_btn, self.export_btn, self.analyze_btn, self.recent_btn):
+            ah.addWidget(b)
 
-        # pannello analisi (cards) — reflow: vanno a capo su schermi stretti
-        self.cards_row = FlowLayout(hspacing=10, vspacing=10)
+        # --- header: titolo brano (sx) + card di analisi compatte (dx) ---
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        self.title_lbl = QLabel("Nessuno stem caricato")
+        self.title_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self.title_lbl.setStyleSheet("font-size:17px; font-weight:700; color:#8b90a0;")
+        self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        cards_host = QWidget()
+        self.cards_row = FlowLayout(cards_host, hspacing=8, vspacing=8)
         self.card_key = _card("TONALITÀ", "—", "#ff9f43")
         self.card_bpm = _card("BPM", "—")
         self.card_scale = _card("SCALA", "—")
         self.card_dur = _card("DURATA", "—")
         self.card_lufs = _card("LUFS", "—")
-        self.card_dr = _card("DYNAMIC RANGE", "—")
-        self.card_ts = _card("TEMPO STABILITY", "—", "#3ddc84")
+        self.card_dr = _card("DYN RANGE", "—")
+        self.card_ts = _card("TEMPO STAB", "—", "#3ddc84")
         for c, _v in (self.card_key, self.card_bpm, self.card_scale, self.card_dur,
                       self.card_lufs, self.card_dr, self.card_ts):
-            c.setMinimumWidth(132)
+            c.setMinimumWidth(74)
             self.cards_row.addWidget(c)
-        root.addLayout(self.cards_row)
+        top.addWidget(self.title_lbl, 1)
+        top.addWidget(cards_host, 0)
+        body.addLayout(top)
 
-        # presenza per stem — reflow su schermi stretti
-        self.presence_row = FlowLayout(hspacing=16, vspacing=6)
+        # --- presenza per stem: pallino colorato + nome + % (reflow) ---
+        presence_host = QWidget()
+        self.presence_row = FlowLayout(presence_host, hspacing=18, vspacing=4)
         self.presence_lbls: dict[str, QLabel] = {}
         for name in STEM_ORDER:
-            box = QVBoxLayout()
-            box.setContentsMargins(0, 0, 0, 0)
-            box.setSpacing(2)
-            t = QLabel(STEM_LABEL[name].upper())
-            t.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:600;")
-            v = QLabel("—")
-            v.setStyleSheet(f"color:{STEM_COLORS[name]}; font-size:16px; font-weight:700;")
-            box.addWidget(t)
-            box.addWidget(v)
-            self.presence_lbls[name] = v
             cell = QWidget()
-            cell.setLayout(box)
-            cell.setMinimumWidth(72)
+            cb = QHBoxLayout(cell)
+            cb.setContentsMargins(0, 0, 0, 0)
+            cb.setSpacing(6)
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color:{STEM_COLORS[name]}; font-size:11px;")
+            t = QLabel(STEM_LABEL[name].upper())
+            t.setStyleSheet("color:#cfd3df; font-size:11px; font-weight:700;"
+                            " letter-spacing:1px;")
+            v = QLabel("—")
+            v.setStyleSheet(f"color:{STEM_COLORS[name]}; font-size:12px; font-weight:800;")
+            cb.addWidget(dot)
+            cb.addWidget(t)
+            cb.addWidget(v)
+            self.presence_lbls[name] = v
             self.presence_row.addWidget(cell)
-        root.addLayout(self.presence_row)
+        body.addWidget(presence_host)
 
-        # riga sezioni (struttura del brano): pulsanti per saltare/loopare
+        # --- riga meta: SEZIONI (sx) · ACCORDO (dx) · notazione ---
         self._sections: list[dict] = []
         self._sec_duration = 0.0
-        sec_row = QHBoxLayout(); sec_row.setSpacing(6)
+        self._chords: list[dict] = []
+        self._chord_times: list[float] = []
+        self._chord_shown = -2
+        self._notation = config.load().get("chord_notation", "latin")
+
+        meta = QHBoxLayout()
+        meta.setSpacing(10)
         sec_title = QLabel("SEZIONI")
-        sec_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:600;")
-        sec_title.setFixedWidth(58)
+        sec_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
+                                " letter-spacing:1px;")
         self.sections_box = QHBoxLayout(); self.sections_box.setSpacing(4)
         self._sections_hint = QLabel("— analizza per rilevarle —")
         self._sections_hint.setStyleSheet("color:#6b7080; font-size:11px; font-style:italic;")
         self.sections_box.addWidget(self._sections_hint)
         self.sections_box.addStretch(1)
         sec_inner = QWidget(); sec_inner.setLayout(self.sections_box)
-        sec_row.addWidget(sec_title)
-        sec_row.addWidget(sec_inner, 1)
-        root.addLayout(sec_row)
 
-        # riga accordi (rilevati dall'analisi) con switch di notazione
-        self._chords: list[dict] = []
-        self._chord_times: list[float] = []
-        self._chord_shown = -2
-        self._notation = config.load().get("chord_notation", "latin")
-        chord_row = QHBoxLayout()
-        chord_row.setSpacing(10)
         ch_title = QLabel("ACCORDO")
-        ch_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:600;")
+        ch_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
+                               " letter-spacing:1px;")
         self.chord_now = QLabel("—")
-        self.chord_now.setStyleSheet("color:#ff9f43; font-size:26px; font-weight:800;")
-        self.chord_now.setFixedWidth(90)
+        self.chord_now.setStyleSheet("color:#ff9f43; font-size:22px; font-weight:800;")
+        self.chord_now.setMinimumWidth(46)
         self.chord_next = QLabel("")
-        self.chord_next.setStyleSheet("color:#8b90a0; font-size:15px;")
+        self.chord_next.setStyleSheet("color:#8b90a0; font-size:14px;")
         self.notation_btn = QPushButton("Do Re Mi" if self._notation == "latin" else "C D E")
         self.notation_btn.setObjectName("GhostMini")
         self.notation_btn.setFixedWidth(84)
         self.notation_btn.setToolTip("Cambia notazione accordi (Do Re Mi ↔ C D E)")
         self.notation_btn.clicked.connect(self._toggle_notation)
-        chord_row.addWidget(ch_title)
-        chord_row.addWidget(self.chord_now)
-        chord_row.addWidget(self.chord_next, 1)
-        chord_row.addWidget(self.notation_btn)
-        root.addLayout(chord_row)
+        meta.addWidget(sec_title)
+        meta.addWidget(sec_inner, 1)
+        meta.addWidget(ch_title)
+        meta.addWidget(self.chord_now)
+        meta.addWidget(self.chord_next)
+        meta.addWidget(self.notation_btn)
+        body.addLayout(meta)
 
-        # area strisce
+        # --- timeline + strisce + scrollbar zoom ---
         self.timeline = TimelineWidget(self.engine)
         self.timeline.seeked.connect(self._on_wave_seek)
-        root.addWidget(self.timeline)
+        body.addWidget(self.timeline)
 
         self.strips_box = QVBoxLayout()
-        self.strips_box.setSpacing(2)
+        self.strips_box.setSpacing(1)
         strips_host = QWidget()
         strips_host.setLayout(self.strips_box)
-        root.addWidget(strips_host, 1)
+        body.addWidget(strips_host, 1)
 
-        # scrollbar dello zoom
         self.zoom_scrollbar = QScrollBar(Qt.Orientation.Horizontal)
         self.zoom_scrollbar.setRange(0, 10000)
         self.zoom_scrollbar.setValue(0)
@@ -826,53 +871,49 @@ class MixerTab(QWidget):
             }
         """)
         self.zoom_scrollbar.valueChanged.connect(self._on_scrollbar_changed)
-        root.addWidget(self.zoom_scrollbar)
+        body.addWidget(self.zoom_scrollbar)
 
-        # --- riga controlli: velocità, loop, metronomo (reflow su schermi stretti) ---
-        ctrl = FlowLayout(hspacing=12, vspacing=8)
-        sp_lbl = QLabel("Velocità")
-        sp_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        root.addLayout(body, 1)
+
+        # ===== barra di trasporto inferiore (un'unica barra, reflow su stretto) =====
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(40, 120)
         self.speed_slider.setValue(100)
-        self.speed_slider.setFixedWidth(150)
+        self.speed_slider.setFixedWidth(140)
         self.speed_slider.setToolTip(
             "Velocità a tono invariato (40–120%).\nUsa i preset per scendere di colpo allo studio lento.")
         self.speed_slider.valueChanged.connect(self._on_speed_changed)
         self.speed_slider.sliderReleased.connect(self._apply_transform)
         self.speed_lbl = QLabel("x1.00")
-        self.speed_lbl.setStyleSheet("color:#e6e8ee; font-size:11px;")
-        # preset rapidi di velocità per lo studio (slow-down a tono invariato)
+        self.speed_lbl.setStyleSheet("color:#e6e8ee; font-size:12px; font-weight:600;")
         self.speed_presets: list[tuple[int, QPushButton]] = []
         preset_box = QHBoxLayout(); preset_box.setSpacing(3)
         for pct in (50, 75, 90, 100):
-            b = QPushButton(f"{pct}%")
-            b.setObjectName("GhostMini"); b.setFixedWidth(40); b.setCheckable(True)
+            b = QPushButton(f"{pct}")
+            b.setObjectName("GhostMini"); b.setFixedWidth(34); b.setCheckable(True)
             b.setToolTip(f"Imposta la velocità al {pct}% (tono invariato)")
             b.clicked.connect(lambda _=False, p=pct: self._set_speed_preset(p))
             self.speed_presets.append((pct, b))
             preset_box.addWidget(b)
         preset_host = QWidget(); preset_host.setLayout(preset_box)
         # trasposizione (semitoni)
-        pitch_lbl = QLabel("Tono")
-        pitch_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
         self.pitch_slider = QSlider(Qt.Orientation.Horizontal)
         self.pitch_slider.setRange(-6, 6)
         self.pitch_slider.setValue(0)
-        self.pitch_slider.setFixedWidth(110)
+        self.pitch_slider.setFixedWidth(100)
         self.pitch_slider.setToolTip("Trasposizione in semitoni (tempo invariato)")
         self.pitch_slider.valueChanged.connect(
             lambda v: self.pitch_lbl.setText(self._fmt_semis(v)))
         self.pitch_slider.sliderReleased.connect(self._apply_transform)
         self.pitch_lbl = QLabel("0 st")
-        self.pitch_lbl.setStyleSheet("color:#e6e8ee; font-size:11px;")
+        self.pitch_lbl.setStyleSheet("color:#e6e8ee; font-size:12px; font-weight:600;")
         # loop
         self.a_btn = QPushButton("A"); self.b_btn = QPushButton("B")
         self.loop_btn = QPushButton("Loop"); self.loop_btn.setCheckable(True)
         self.loopclr_btn = QPushButton("×")
         for b in (self.a_btn, self.b_btn, self.loop_btn, self.loopclr_btn):
-            b.setObjectName("GhostMini"); b.setFixedWidth(48)
-        self.loop_btn.setFixedWidth(70)  # "Loop" ha bisogno di più spazio
+            b.setObjectName("GhostMini"); b.setFixedWidth(42)
+        self.loop_btn.setFixedWidth(58)  # "Loop" ha bisogno di più spazio
         self.a_btn.setToolTip("Imposta l'inizio del loop al punto attuale (tasto A)\n"
                               "Suggerimento: Ctrl/Shift+trascina sulla waveform per selezionare il loop")
         self.b_btn.setToolTip("Imposta la fine del loop al punto attuale (tasto B)")
@@ -883,7 +924,7 @@ class MixerTab(QWidget):
         self.loopclr_btn.clicked.connect(self._on_loop_clear)
         # loop progressivo: accelera ad ogni N giri fino al 100%
         self.autospeed_btn = QPushButton("Auto↑")
-        self.autospeed_btn.setObjectName("GhostMini"); self.autospeed_btn.setFixedWidth(56)
+        self.autospeed_btn.setObjectName("GhostMini"); self.autospeed_btn.setFixedWidth(52)
         self.autospeed_btn.setToolTip(
             "Loop progressivo: parte lento e accelera ad ogni giro fino a 100%.\n"
             "Clicca per configurare e attivare.")
@@ -893,7 +934,7 @@ class MixerTab(QWidget):
         self.zoomin_btn = QPushButton("+")
         self.zoomfit_btn = QPushButton("⤢")
         for b in (self.zoomout_btn, self.zoomin_btn, self.zoomfit_btn):
-            b.setObjectName("GhostMini"); b.setFixedWidth(32)
+            b.setObjectName("GhostMini"); b.setFixedWidth(30)
         self.zoomout_btn.setToolTip("Zoom indietro (anche Ctrl+rotella sulla traccia)")
         self.zoomin_btn.setToolTip("Zoom avanti (anche Ctrl+rotella sulla traccia)")
         self.zoomfit_btn.setToolTip("Adatta: mostra tutto il brano")
@@ -902,18 +943,18 @@ class MixerTab(QWidget):
         self.zoomfit_btn.clicked.connect(self._zoom_reset)
         # toggle griglia beat sulle waveform (default acceso)
         self.beatgrid_btn = QPushButton("Griglia"); self.beatgrid_btn.setCheckable(True)
-        self.beatgrid_btn.setObjectName("GhostMini"); self.beatgrid_btn.setFixedWidth(64)
+        self.beatgrid_btn.setObjectName("GhostMini"); self.beatgrid_btn.setFixedWidth(60)
         self.beatgrid_btn.setChecked(True)
         self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;")
         self.beatgrid_btn.setToolTip("Mostra/nascondi la griglia dei beat sulle waveform.")
         self.beatgrid_btn.toggled.connect(self._on_beatgrid_toggle)
         # metronomo
         self.click_btn = QPushButton("Click"); self.click_btn.setCheckable(True)
-        self.click_btn.setObjectName("GhostMini"); self.click_btn.setFixedWidth(66)
+        self.click_btn.setObjectName("GhostMini"); self.click_btn.setFixedWidth(56)
         self.click_btn.toggled.connect(self._on_click_toggle)
         # toggle griglia regolare (steady) vs beat rilevati
         self.steady_btn = QPushButton("Steady"); self.steady_btn.setCheckable(True)
-        self.steady_btn.setObjectName("GhostMini"); self.steady_btn.setFixedWidth(60)
+        self.steady_btn.setObjectName("GhostMini"); self.steady_btn.setFixedWidth(58)
         self.steady_btn.setChecked(True)
         self.steady_btn.setStyleSheet("background:#3ddc84;color:#14161c;")
         self.steady_btn.setToolTip(
@@ -921,51 +962,53 @@ class MixerTab(QWidget):
         self.steady_btn.toggled.connect(self._on_steady_toggle)
         self.click_vol = QSlider(Qt.Orientation.Horizontal)
         self.click_vol.setRange(0, 100); self.click_vol.setValue(60)
-        self.click_vol.setFixedWidth(80)
+        self.click_vol.setFixedWidth(70)
         self.click_vol.valueChanged.connect(lambda v: self.engine.set_click(self.click_btn.isChecked(), v / 100))
-        loop_lbl = QLabel("Loop"); loop_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
-        loop_hint = QLabel("Ctrl+trascina sulla traccia")
-        loop_hint.setStyleSheet("color:#6b7080; font-size:10px; font-style:italic;")
-        loop_hint.setToolTip("Tieni premuto Ctrl (o Shift) e trascina sulla waveform "
-                             "per selezionare la regione da ripetere.")
-        zoom_lbl = QLabel("Zoom"); zoom_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
-        # ogni cluster resta unito e va a capo come blocco quando manca spazio
-        ctrl.addWidget(_hgroup(sp_lbl, self.speed_slider, self.speed_lbl, preset_host))
-        ctrl.addWidget(_hgroup(pitch_lbl, self.pitch_slider, self.pitch_lbl))
-        ctrl.addWidget(_hgroup(loop_lbl, self.a_btn, self.b_btn, self.loop_btn,
-                               self.loopclr_btn, self.autospeed_btn))
-        ctrl.addWidget(loop_hint)   # voce a sé: non allarga il cluster Loop
-        ctrl.addWidget(_hgroup(zoom_lbl, self.zoomout_btn, self.zoomin_btn,
-                               self.zoomfit_btn, self.beatgrid_btn))
-        ctrl.addWidget(_hgroup(self.click_btn, self.steady_btn, self.click_vol))
-        root.addLayout(ctrl)
 
-        # transport
-        tr = QHBoxLayout()
+        # transport play/stop/tempo
         self.play_btn = QPushButton("▶")
         self.play_btn.setObjectName("Primary")
-        self.play_btn.setFixedWidth(60)
+        self.play_btn.setFixedSize(46, 46)
+        self.play_btn.setStyleSheet("border-radius:23px; font-size:18px;")
         self.play_btn.clicked.connect(self._on_play)
         self.stop_btn = QPushButton("■")
         self.stop_btn.setObjectName("Ghost")
-        self.stop_btn.setFixedWidth(46)
+        self.stop_btn.setFixedWidth(42)
         self.stop_btn.clicked.connect(self._on_stop)
         self.time_lbl = QLabel("0:00 / 0:00")
-        self.time_lbl.setStyleSheet("color:#8b90a0; font-family:Consolas,monospace;")
-        master_lbl = QLabel("Master")
-        master_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        self.time_lbl.setStyleSheet("color:#cfd3df; font-family:Consolas,monospace;"
+                                    " font-size:13px;")
+        # master
         self.master = QSlider(Qt.Orientation.Horizontal)
         self.master.setRange(-40, 6)
         self.master.setValue(0)
-        self.master.setFixedWidth(120)
+        self.master.setFixedWidth(110)
         self.master.valueChanged.connect(lambda v: self.engine.set_master(float(v)))
-        tr.addWidget(self.play_btn)
-        tr.addWidget(self.stop_btn)
-        tr.addWidget(self.time_lbl)
-        tr.addStretch(1)
-        tr.addWidget(master_lbl)
-        tr.addWidget(self.master)
-        root.addLayout(tr)
+
+        def _cap(text: str) -> QLabel:
+            lb = QLabel(text)
+            lb.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
+                             " letter-spacing:1px;")
+            return lb
+
+        bar = FlowLayout(hspacing=14, vspacing=8)
+        bar.addWidget(_hgroup(self.play_btn, self.stop_btn, self.time_lbl, spacing=10))
+        bar.addWidget(_hgroup(_cap("VELOCITÀ ·"), self.speed_lbl, self.speed_slider,
+                              preset_host))
+        bar.addWidget(_hgroup(_cap("TONO ·"), self.pitch_lbl, self.pitch_slider))
+        bar.addWidget(_hgroup(_cap("LOOP"), self.a_btn, self.b_btn, self.loop_btn,
+                              self.loopclr_btn, self.autospeed_btn))
+        bar.addWidget(_hgroup(_cap("ZOOM"), self.zoomout_btn, self.zoomin_btn,
+                              self.zoomfit_btn, self.beatgrid_btn))
+        bar.addWidget(_hgroup(self.click_btn, self.steady_btn, self.click_vol))
+        bar.addWidget(_hgroup(_cap("MASTER"), self.master))
+
+        transport = QFrame()
+        transport.setObjectName("TransportBar")
+        tb = QVBoxLayout(transport)
+        tb.setContentsMargins(18, 10, 18, 10)
+        tb.addLayout(bar)
+        root.addWidget(transport, 0)
 
         self._set_loaded(False)
 
@@ -983,10 +1026,19 @@ class MixerTab(QWidget):
         if d:
             self.load_folder(d)
 
+    def _set_song_title(self, name: str) -> None:
+        """Titolo brano: nome in evidenza (rosa) + ' · stems' tenue."""
+        safe = name.replace("<", "&lt;").replace(">", "&gt;")
+        self.title_lbl.setText(
+            f"<span style='color:{STEM_COLORS['vocals']};'>♪ {safe}</span>"
+            "<span style='color:#8b90a0;'> &middot; stems</span>")
+
     def _show_recent_menu(self) -> None:
-        """Menu degli stem recenti (dalla cronologia): un clic per riaprire."""
+        """Menu: carica una cartella + stem recenti (dalla cronologia)."""
         recents = history.stem_recents()
         menu = QMenu(self)
+        menu.addAction("Carica cartella stem…", self._on_load_dialog)
+        menu.addSeparator()
         if not recents:
             act = menu.addAction("(nessuno stem recente)")
             act.setEnabled(False)
@@ -1015,7 +1067,7 @@ class MixerTab(QWidget):
         self.engine.stop()
         self.engine.load_files(files)
         self._folder = folder
-        self.title_lbl.setText(os.path.basename(folder))
+        self._set_song_title(os.path.basename(folder))
         self._view = [0.0, 1.0]   # nuovo brano: zoom azzerato
         self._build_strips(files)
         self._set_loaded(True)

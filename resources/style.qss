@@ -72,6 +72,32 @@ QFrame#Card {
     border-radius: 14px;
 }
 
+/* Mixer — card di analisi compatte (TONALITÀ / BPM / SCALA …) in alto a destra */
+QFrame#StatCard {
+    background: #161922;
+    border: 1px solid #262a36;
+    border-radius: 10px;
+}
+
+/* Mixer — pannello controlli di una traccia (pannello sinistro) */
+QFrame#StripPanel {
+    background: #12141b;
+    border: none;
+    border-right: 1px solid #1e2230;
+}
+
+/* Mixer — barra di trasporto inferiore */
+QFrame#TransportBar {
+    background: #12141b;
+    border-top: 1px solid #1e2230;
+}
+
+/* Mixer — riga header (titolo + cards) e righe meta (sezioni/accordo) */
+QFrame#MixerHeader, QFrame#MixerMeta {
+    background: transparent;
+    border: none;
+}
+
 /* Input testo */
 QLineEdit {
     background: #232733;
@@ -147,6 +173,38 @@ QPushButton#Ghost {
     border: 1px solid #353a48;
 }
 QPushButton#Ghost:hover { background: #232733; }
+
+/* Slider orizzontali (mixer: velocità, tono, master, pan) */
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #2a2e3a;
+    border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: #4a5066;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #e6e8ee;
+    width: 13px;
+    height: 13px;
+    margin: -5px 0;
+    border-radius: 6px;
+}
+QSlider::handle:horizontal:hover { background: #ffffff; }
+QSlider:disabled::handle:horizontal { background: #5a5f70; }
+QSlider::groove:vertical {
+    width: 4px;
+    background: #2a2e3a;
+    border-radius: 2px;
+}
+QSlider::handle:vertical {
+    background: #e6e8ee;
+    width: 13px;
+    height: 13px;
+    margin: 0 -5px;
+    border-radius: 6px;
+}
 
 /* Checkbox */
 QCheckBox { spacing: 12px; }

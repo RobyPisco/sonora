@@ -228,17 +228,21 @@ def _managed_py312() -> Path | None:
 
 
 def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
-    """Riscrive `home` in pyvenv.cfg alla cartella REALE del Python 3.12.
+    """Riscrive `home` in pyvenv.cfg alla cartella REALE/concreta del Python 3.12.
 
     uv crea un alias minor-version come *junction* (`cpython-3.12-...` →
     `cpython-3.12.NN-...`). Con la mitigazione «redirection trust» di uv quella
     junction non è attraversabile e l'ispezione del venv fallisce con
-    «untrusted mount point» (os error 448). Puntando `home` alla cartella reale
-    si elimina la junction dal percorso. Ritorna True se ha modificato il file.
+    «untrusted mount point» (os error 448). Risolviamo puntando `home` direttamente
+    alla cartella reale/concreta scaricata da uv, evitando la junction.
     """
     cfg = venv / "pyvenv.cfg"
     if not cfg.exists():
         return False
+    exe = _managed_py312()
+    if not exe:
+        return False
+    concrete_home = exe.parent
     try:
         lines = cfg.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -247,14 +251,10 @@ def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
     changed = False
     for ln in lines:
         if ln.split("=", 1)[0].strip().lower() == "home" and "=" in ln:
-            try:
-                cur = Path(ln.split("=", 1)[1].strip())
-                real = Path(os.path.realpath(cur))
-                if real != cur and real.exists():
-                    ln = f"home = {real}"
-                    changed = True
-            except OSError:
-                pass  # Se realpath fallisce per la junction (errore 448), teniamo il percorso originale
+            cur = Path(ln.split("=", 1)[1].strip())
+            if cur != concrete_home:
+                ln = f"home = {concrete_home}"
+                changed = True
         out.append(ln)
     if changed:
         try:

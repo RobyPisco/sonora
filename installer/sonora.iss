@@ -3,7 +3,11 @@
 ; Prima di compilare esegui la build:  pyinstaller build.spec --noconfirm
 
 #define AppName "Sonora"
-#define AppVersion "1.5.3"
+; AppVersion può essere passata dalla riga di comando (CI):
+;   ISCC.exe /DAppVersion=1.6.0 installer\sonora.iss
+#ifndef AppVersion
+  #define AppVersion "1.5.3"
+#endif
 #define AppPublisher "Pisco Factory"
 #define AppExe "Sonora.exe"
 
@@ -29,6 +33,11 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Auto-update: se Sonora è in esecuzione (avvio installer dall'app), chiudila
+; per poter sovrascrivere i file, senza chiedere conferma all'utente.
+CloseApplications=yes
+CloseApplicationsFilter=*.exe
+RestartApplications=no
 
 [Languages]
 Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"

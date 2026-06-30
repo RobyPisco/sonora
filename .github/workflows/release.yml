@@ -1,0 +1,75 @@
+name: Release
+
+# Builda exe + installer e pubblica la GitHub Release al push di un tag vX.Y.Z.
+# Il tag DEVE combaciare con __version__ in app/__init__.py.
+#
+# Prerequisito una-tantum: una release fissa con tag "deps" contenente bin.zip
+# (ffmpeg.exe, ffprobe.exe, uv.exe, rubberband.exe, rubberband-r3.exe, sndfile.dll),
+# perché bin/ è gitignorato. Crea il pacchetto con tools/make-bin-zip.ps1 e
+# caricalo: gh release create deps bin.zip -t "binari bundlati" -n "uso CI".
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # serve a softprops/action-gh-release per creare la release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Scarica i binari bundlati (bin/)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download deps --repo $env:GITHUB_REPOSITORY --pattern bin.zip --output bin.zip
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Expand-Archive bin.zip -DestinationPath bin -Force
+          Get-ChildItem bin
+
+      - name: Leggi versione e verifica il tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/__init__.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($tag -ne $v) {
+            Write-Error "Tag '$tag' != __version__ '$v' in app/__init__.py. Allineali prima di taggare."
+            exit 1
+          }
+
+      - name: Build exe (PyInstaller)
+        run: pyinstaller build.spec --noconfirm
+
+      - name: Installa Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\sonora.iss
+
+      - name: Pubblica la Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist_installer/SonoraSetup-*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -359,6 +360,12 @@ class MainWindow(QWidget):
         self._worker: DownloadWorker | None = None
         self._upd_thread: QThread | None = None
         self._upd_worker = None
+        self._appchk_thread: QThread | None = None   # controllo aggiornamenti app
+        self._appchk_worker = None
+        self._appchk_verbose = False
+        self._appupd_thread: QThread | None = None    # download installer app
+        self._appupd_worker = None
+        self._appupd_progress: QProgressDialog | None = None
         self._stem_thread: QThread | None = None
         self._stem_worker: StemWorker | None = None
         self._stem_row: QueueRow | None = None
@@ -390,6 +397,10 @@ class MainWindow(QWidget):
         self._setup_tray()
         self._setup_clipboard_watch()
         self._autopaste_clipboard()
+
+        # controllo aggiornamenti app all'avvio (silenzioso, in background)
+        if app_update.auto_check_enabled() and app_update.configured_repo():
+            QTimer.singleShot(2500, lambda: self._start_update_check(verbose=False))
 
     # ---------- costruzione UI ----------
 
@@ -1105,27 +1116,106 @@ class MainWindow(QWidget):
         self.close()
 
     def _on_check_app_update(self) -> None:
-        import webbrowser
+        """Controllo aggiornamenti richiesto dall'utente (verboso)."""
+        self._start_update_check(verbose=True)
+
+    def _start_update_check(self, verbose: bool) -> None:
+        """Avvia in background il controllo della release più recente.
+
+        verbose=True (richiesto a mano) mostra anche gli esiti negativi
+        ("sei aggiornato" / "errore"); verbose=False (all'avvio) resta silenzioso
+        se non c'è nulla di nuovo.
+        """
         if not app_update.configured_repo():
-            QMessageBox.information(
-                self, "Aggiornamenti",
-                "Aggiornamenti non configurati.\n\n"
-                "Imposta \"update_repo\": \"owner/repo\" nel file settings.json "
-                "(%APPDATA%/Sonora) e pubblica le release su GitHub.")
+            if verbose:
+                QMessageBox.information(
+                    self, "Aggiornamenti",
+                    "Aggiornamenti non configurati.\n\n"
+                    "Imposta \"update_repo\": \"owner/repo\" nel file settings.json "
+                    "(%APPDATA%/Sonora) e pubblica le release su GitHub.")
             return
-        info = app_update.check_latest()
+        if self._appchk_thread and self._appchk_thread.isRunning():
+            return
+        self._appchk_verbose = verbose
+        self._appchk_thread, self._appchk_worker = app_update.make_check_thread()
+        self._appchk_worker.done.connect(self._on_update_checked)
+        self._appchk_thread.finished.connect(self._cleanup_appchk_thread)
+        self._appchk_thread.start()
+
+    def _cleanup_appchk_thread(self) -> None:
+        self._appchk_thread = None
+        self._appchk_worker = None
+
+    def _on_update_checked(self, info) -> None:
+        import webbrowser
+        verbose = self._appchk_verbose
         if info is None:
-            QMessageBox.warning(self, "Aggiornamenti", "Impossibile controllare gli aggiornamenti.")
+            if verbose:
+                QMessageBox.warning(self, "Aggiornamenti",
+                                    "Impossibile controllare gli aggiornamenti.")
             return
-        if info["newer"]:
+        if not info.get("newer"):
+            if verbose:
+                QMessageBox.information(self, "Aggiornamenti", "Sonora è aggiornata.")
+            return
+        if info.get("download_url"):
             r = QMessageBox.question(
                 self, "Aggiornamento disponibile",
-                f"Nuova versione {info['version']} disponibile "
-                f"(hai la {__version__}).\n\nAprire la pagina di download?")
+                f"Nuova versione {info['version']} disponibile (hai la {__version__}).\n\n"
+                "Scaricare e installare ora? L'app si chiuderà per completare "
+                "l'installazione.")
+            if r == QMessageBox.StandardButton.Yes:
+                self._start_update_download(info)
+        else:
+            # release senza installer allegato: ripiega sulla pagina web
+            r = QMessageBox.question(
+                self, "Aggiornamento disponibile",
+                f"Nuova versione {info['version']} disponibile (hai la {__version__}).\n\n"
+                "Aprire la pagina di download?")
             if r == QMessageBox.StandardButton.Yes:
                 webbrowser.open(info["url"])
+
+    def _start_update_download(self, info: dict) -> None:
+        if self._appupd_thread and self._appupd_thread.isRunning():
+            return
+        self._log(f"— scarico aggiornamento {info['version']} —")
+        self._appupd_progress = QProgressDialog(
+            "Scarico l'aggiornamento…", "", 0, 100, self)
+        self._appupd_progress.setWindowTitle("Aggiornamento Sonora")
+        self._appupd_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._appupd_progress.setCancelButton(None)   # download non interrompibile
+        self._appupd_progress.setMinimumDuration(0)
+        self._appupd_progress.setAutoClose(False)
+        self._appupd_progress.setAutoReset(False)
+        self._appupd_progress.setValue(0)
+        self._appupd_thread, self._appupd_worker = app_update.make_download_thread(
+            info["download_url"], info.get("asset_name", ""))
+        self._appupd_worker.progress.connect(
+            lambda p: self._appupd_progress and self._appupd_progress.setValue(int(p)))
+        self._appupd_worker.log.connect(self._log)
+        self._appupd_worker.finished.connect(self._on_update_downloaded)
+        self._appupd_thread.finished.connect(self._cleanup_appupd_thread)
+        self._appupd_thread.start()
+
+    def _cleanup_appupd_thread(self) -> None:
+        self._appupd_thread = None
+        self._appupd_worker = None
+
+    def _on_update_downloaded(self, ok: bool, path_or_err: str) -> None:
+        if self._appupd_progress is not None:
+            self._appupd_progress.close()
+            self._appupd_progress = None
+        if not ok:
+            self._log(f"✖ download aggiornamento fallito: {path_or_err}")
+            QMessageBox.warning(self, "Aggiornamento fallito", path_or_err)
+            return
+        if app_update.launch_installer(path_or_err):
+            self._log("Avvio installer, chiudo Sonora…")
+            self._really_quit = True
+            QApplication.quit()
         else:
-            QMessageBox.information(self, "Aggiornamenti", "Sonora è aggiornata.")
+            QMessageBox.warning(self, "Aggiornamento",
+                                "Impossibile avviare l'installer scaricato.")
 
     def _setup_clipboard_watch(self) -> None:
         self._clip = QApplication.clipboard()

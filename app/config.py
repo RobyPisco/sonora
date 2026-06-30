@@ -24,7 +24,8 @@ DEFAULTS: dict[str, Any] = {
     "notify_end": True,
     "stem_mode": "6hq",     # 2 | 4 | 6 | 6hq (ensemble qualità max)
     "stem_format": "wav",   # wav | flac | mp3
-    "update_repo": "",      # "owner/repo" GitHub per gli aggiornamenti dell'app
+    "update_repo": "RobyPisco/sonora",  # "owner/repo" GitHub per gli aggiornamenti dell'app
+    "auto_check_updates": True,          # controlla aggiornamenti all'avvio
     "chord_notation": "latin",   # latin (Do Re Mi) | anglo (C D E)
 }
 

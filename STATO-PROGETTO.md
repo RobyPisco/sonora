@@ -9,8 +9,15 @@ Versione corrente: **1.5.3** (allineata in `app/__init__.py`, `installer/sonora.
   **ricerca testuale** (scrivi e premi Invio → ytsearch), auto-incolla + drag&drop, **carica file locale**,
   Stop/Riprova/menu contestuale, sottocartella per file, metadata+cover, normalizza volume.
 - **Tray + monitor appunti**, **notifica a fine**, **cronologia** (`history.json`), **aggiorna yt-dlp**.
-- **Auto-update app**: meccanismo pronto (tray "Controlla aggiornamenti app") ma serve un repo GitHub
-  (`update_repo` in settings.json) per funzionare. NON ancora attivo.
+- **Auto-update app ATTIVO**: `update_repo` predefinito = `RobyPisco/sonora`. All'avvio controlla in
+  background le GitHub Releases; se c'è una versione più nuova propone "scarica e installa" (1 click),
+  scarica l'installer in `%APPDATA%/Sonora/updates/`, lo lancia e chiude l'app (l'installer Inno Setup
+  chiude l'istanza con `CloseApplications=yes`). Anche manuale da tray "Controlla aggiornamenti app".
+  Disattivabile con `auto_check_updates: false` in settings.json.
+- **CI release** (`.github/workflows/release.yml`): al push di un tag `vX.Y.Z` builda exe+installer su
+  runner Windows e pubblica la Release. Prerequisito una-tantum: release fissa tag `deps` con `bin.zip`
+  (i binari di `bin/`, gitignorati) — crealo con `tools/make-bin-zip.ps1`. Il tag deve combaciare con
+  `__version__` in `app/__init__.py`.
 - **Separazione stem**: click destro / "Separa file…" / drag. Modalità:
   - **Roformer 6 stem** (rof6) e **Roformer voce/strumentale** (rof, top karaoke) — via audio-separator / BS-RoFormer
   - **6hq** (ensemble Demucs htdemucs_ft+htdemucs_6s), **6**, **4**, **2** (Demucs)
@@ -67,8 +74,10 @@ Versione corrente: **1.5.3** (allineata in `app/__init__.py`, `installer/sonora.
 - Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.5.3.exe`
 
 ## DA FARE (idee proposte, scelta utente)
-- **Auto-update app**: creare repo GitHub + release per attivarlo (`update_repo` in settings.json).
-- **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto".
+- **Release iniziale auto-update**: creare la release fissa `deps` con `bin.zip` (vedi sopra), poi
+  bumpare `__version__`, committare e taggare `vX.Y.Z` per far partire la prima build CI.
+- **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto" (anche durante
+  l'auto-update). Certificato OV ~100-400€/anno.
 
 ## Note
 - Settings/cronologia/analysis/sessioni mixer in `%APPDATA%/Sonora/`.

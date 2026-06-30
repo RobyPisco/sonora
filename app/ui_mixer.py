@@ -996,7 +996,10 @@ class MixerTab(QWidget):
                    self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
                    self.click_btn, self.steady_btn,
                    *(pb for _p, pb in self.speed_presets)):
-            _b.setFixedHeight(30)
+            _b.setFixedHeight(28)
+        # cursori della barra: altezza fissa così la maniglia non viene tagliata
+        for _s in (self.speed_slider, self.pitch_slider, self.click_vol, self.master):
+            _s.setFixedHeight(22)
 
         def _cap(text: str) -> QLabel:
             lb = QLabel(text)
@@ -1004,7 +1007,12 @@ class MixerTab(QWidget):
                              " letter-spacing:1px;")
             return lb
 
-        bar = FlowLayout(hspacing=14, vspacing=8)
+        # riga unica (niente reflow: evita il taglio verticale dei controlli);
+        # MASTER spinto a destra dallo stretch. Scorre oltre il bordo solo su
+        # finestre molto strette, ma non si accavalla mai.
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(16)
         bar.addWidget(_hgroup(self.play_btn, self.stop_btn, self.time_lbl, spacing=10))
         bar.addWidget(_hgroup(_cap("VELOCITÀ ·"), self.speed_lbl, self.speed_slider,
                               preset_host))
@@ -1015,12 +1023,14 @@ class MixerTab(QWidget):
                               self.zoomfit_btn, self.beatgrid_btn))
         bar.addWidget(_hgroup(_cap("CLICK"), self.click_btn, self.steady_btn,
                               self.click_vol))
+        bar.addStretch(1)
         bar.addWidget(_hgroup(_cap("MASTER"), self.master))
 
         transport = QFrame()
         transport.setObjectName("TransportBar")
-        tb = QVBoxLayout(transport)
-        tb.setContentsMargins(18, 10, 18, 10)
+        transport.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        tb = QHBoxLayout(transport)
+        tb.setContentsMargins(18, 9, 18, 9)
         tb.addLayout(bar)
         root.addWidget(transport, 0)
 

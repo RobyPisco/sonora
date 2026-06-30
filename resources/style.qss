@@ -175,33 +175,37 @@ QPushButton#Ghost {
 QPushButton#Ghost:hover { background: #232733; }
 
 /* Slider orizzontali (mixer: velocità, tono, master, pan) */
+QSlider { background: transparent; border: none; }
 QSlider::groove:horizontal {
-    height: 4px;
+    height: 3px;
     background: #2a2e3a;
-    border-radius: 2px;
+    border: none;
+    border-radius: 1px;
 }
 QSlider::sub-page:horizontal {
-    background: #4a5066;
-    border-radius: 2px;
+    background: #565d72;
+    border: none;
+    border-radius: 1px;
 }
 QSlider::handle:horizontal {
     background: #e6e8ee;
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     margin: -5px 0;
     border-radius: 6px;
 }
 QSlider::handle:horizontal:hover { background: #ffffff; }
-QSlider:disabled::handle:horizontal { background: #5a5f70; }
+QSlider::handle:horizontal:disabled { background: #5a5f70; }
 QSlider::groove:vertical {
-    width: 4px;
+    width: 3px;
     background: #2a2e3a;
-    border-radius: 2px;
+    border: none;
+    border-radius: 1px;
 }
 QSlider::handle:vertical {
     background: #e6e8ee;
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     margin: 0 -5px;
     border-radius: 6px;
 }

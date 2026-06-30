@@ -264,6 +264,32 @@ def _normalize_pyvenv_home(venv: Path, log_cb: LogCb | None = None) -> bool:
     return changed
 
 
+def _remove_uv_alias_junctions(edir: Path, log_cb: LogCb | None = None) -> bool:
+    """Elimina la junction alias minor-version di uv (`cpython-3.12-...`).
+
+    La causa reale dell'errore 448 non è il riferimento in pyvenv.cfg, ma il
+    fatto che uv (con la mitigazione «redirection trust» attiva) *elenca* la
+    cartella `python/` durante l'ispezione del venv e, incontrando quella
+    junction, rifiuta di attraversarla → «untrusted mount point». Il Python
+    concreto (`cpython-3.12.NN-...`) resta: rimuovere solo il link basta.
+    Ritorna True se ha rimosso almeno una junction.
+    """
+    pydir = edir / "python"
+    if not pydir.exists():
+        return False
+    removed = False
+    for d in pydir.glob("cpython-3.12-*"):   # NON intercetta `cpython-3.12.NN-...`
+        try:
+            if os.path.isjunction(str(d)):
+                os.rmdir(str(d))             # rimuove la junction, non il target
+                removed = True
+        except OSError:
+            pass
+    if removed and log_cb:
+        log_cb("Rimuovo la junction Python di uv (causa dell'errore 448).")
+    return removed
+
+
 def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
     """Crea il venv 3.12, robusto al fallimento del link minor-version di uv.
 
@@ -284,6 +310,7 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
             return False
         if rc == 0 and venv_python().exists():
             _normalize_pyvenv_home(venv, log_cb)
+            _remove_uv_alias_junctions(venv.parent, log_cb)
             return True
         exe = _managed_py312()   # il download del Python è comunque avvenuto?
     if exe is None:
@@ -297,6 +324,7 @@ def _create_venv(uv: str, venv: Path, log_cb: LogCb, cancel: Cancel) -> bool:
         return False
     if rc == 0 and venv_python().exists():
         _normalize_pyvenv_home(venv, log_cb)
+        _remove_uv_alias_junctions(venv.parent, log_cb)
         return True
     return False
 
@@ -327,10 +355,12 @@ def install_engine(log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> bool:
             else:
                 log_cb("Annullato.")
             return False
-    else:
-        # Venv già presente da una versione precedente: ripara il riferimento al
-        # Python se punta alla junction di uv (altrimenti uv pip → errore 448).
-        _normalize_pyvenv_home(venv, log_cb)
+
+    # Ripara/previene l'errore 448 ad ogni avvio (idempotente, anche su venv già
+    # creati da versioni precedenti): normalizza il riferimento al Python ed
+    # elimina la junction alias di uv che uv non riesce ad attraversare.
+    _normalize_pyvenv_home(venv, log_cb)
+    _remove_uv_alias_junctions(edir, log_cb)
 
     steps: list[tuple[str, list[str]]] = []
     steps.append((f"Installo PyTorch ({'CUDA' if gpu else 'CPU'}) — può richiedere alcuni minuti…",

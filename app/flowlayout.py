@@ -80,7 +80,9 @@ class FlowLayout(QLayout):
             w = item.sizeHint().width()
             h = item.sizeHint().height()
             next_x = x + w + self._hspace
-            if next_x - self._hspace > eff.right() and line_height > 0:
+            # eff.right() è inclusivo (x+larghezza-1): senza il +1 l'ultimo
+            # elemento, con larghezza pari al sizeHint, andrebbe a capo per un px.
+            if next_x - self._hspace > eff.right() + 1 and line_height > 0:
                 x = eff.x()
                 y = y + line_height + self._vspace
                 next_x = x + w + self._hspace

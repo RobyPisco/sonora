@@ -228,7 +228,7 @@ def _hgroup(*widgets, spacing: int = 6) -> QWidget:
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(spacing)
     for x in widgets:
-        lay.addWidget(x)
+        lay.addWidget(x, 0, Qt.AlignmentFlag.AlignVCenter)
     return w
 
 
@@ -715,8 +715,8 @@ class MixerTab(QWidget):
 
         # ===== contenuto principale (margini interni) =====
         body = QVBoxLayout()
-        body.setContentsMargins(18, 14, 18, 8)
-        body.setSpacing(10)
+        body.setContentsMargins(18, 10, 18, 6)
+        body.setSpacing(6)
 
         # --- bottoni azione (Accordatore / Esporta / Analizza / Recenti):
         #     montati da MainWindow come corner widget della barra schede ---
@@ -750,11 +750,16 @@ class MixerTab(QWidget):
         top.setSpacing(12)
         self.title_lbl = QLabel("Nessuno stem caricato")
         self.title_lbl.setTextFormat(Qt.TextFormat.RichText)
-        self.title_lbl.setStyleSheet("font-size:17px; font-weight:700; color:#8b90a0;")
+        self.title_lbl.setStyleSheet("font-size:16px; font-weight:700; color:#8b90a0;")
         self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        # minimo a 0: senza, il QLabel pretende la larghezza dell'intero titolo
+        # e comprime le card mandandole a capo. Così cede spazio e le card
+        # restano su una sola riga (il titolo viene troncato se serve).
+        self.title_lbl.setMinimumWidth(0)
 
         cards_host = QWidget()
-        self.cards_row = FlowLayout(cards_host, hspacing=8, vspacing=8)
+        cards_host.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.cards_row = FlowLayout(cards_host, hspacing=6, vspacing=6)
         self.card_key = _card("TONALITÀ", "—", "#ff9f43")
         self.card_bpm = _card("BPM", "—")
         self.card_scale = _card("SCALA", "—")
@@ -968,12 +973,12 @@ class MixerTab(QWidget):
         # transport play/stop/tempo
         self.play_btn = QPushButton("▶")
         self.play_btn.setObjectName("Primary")
-        self.play_btn.setFixedSize(46, 46)
-        self.play_btn.setStyleSheet("border-radius:23px; font-size:18px;")
+        self.play_btn.setFixedSize(40, 40)
+        self.play_btn.setStyleSheet("border-radius:20px; font-size:16px;")
         self.play_btn.clicked.connect(self._on_play)
         self.stop_btn = QPushButton("■")
-        self.stop_btn.setObjectName("Ghost")
-        self.stop_btn.setFixedWidth(42)
+        self.stop_btn.setObjectName("GhostMini")
+        self.stop_btn.setFixedWidth(36)
         self.stop_btn.clicked.connect(self._on_stop)
         self.time_lbl = QLabel("0:00 / 0:00")
         self.time_lbl.setStyleSheet("color:#cfd3df; font-family:Consolas,monospace;"
@@ -984,6 +989,14 @@ class MixerTab(QWidget):
         self.master.setValue(0)
         self.master.setFixedWidth(110)
         self.master.valueChanged.connect(lambda v: self.engine.set_master(float(v)))
+
+        # altezza uniforme per tutti i pulsantini della barra → allineati ai cursori
+        for _b in (self.stop_btn, self.a_btn, self.b_btn, self.loop_btn,
+                   self.loopclr_btn, self.autospeed_btn, self.zoomout_btn,
+                   self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
+                   self.click_btn, self.steady_btn,
+                   *(pb for _p, pb in self.speed_presets)):
+            _b.setFixedHeight(30)
 
         def _cap(text: str) -> QLabel:
             lb = QLabel(text)
@@ -1000,7 +1013,8 @@ class MixerTab(QWidget):
                               self.loopclr_btn, self.autospeed_btn))
         bar.addWidget(_hgroup(_cap("ZOOM"), self.zoomout_btn, self.zoomin_btn,
                               self.zoomfit_btn, self.beatgrid_btn))
-        bar.addWidget(_hgroup(self.click_btn, self.steady_btn, self.click_vol))
+        bar.addWidget(_hgroup(_cap("CLICK"), self.click_btn, self.steady_btn,
+                              self.click_vol))
         bar.addWidget(_hgroup(_cap("MASTER"), self.master))
 
         transport = QFrame()
@@ -1027,11 +1041,10 @@ class MixerTab(QWidget):
             self.load_folder(d)
 
     def _set_song_title(self, name: str) -> None:
-        """Titolo brano: nome in evidenza (rosa) + ' · stems' tenue."""
+        """Titolo brano: nome cartella in evidenza (rosa)."""
         safe = name.replace("<", "&lt;").replace(">", "&gt;")
         self.title_lbl.setText(
-            f"<span style='color:{STEM_COLORS['vocals']};'>♪ {safe}</span>"
-            "<span style='color:#8b90a0;'> &middot; stems</span>")
+            f"<span style='color:{STEM_COLORS['vocals']};'>♪ {safe}</span>")
 
     def _show_recent_menu(self) -> None:
         """Menu: carica una cartella + stem recenti (dalla cronologia)."""

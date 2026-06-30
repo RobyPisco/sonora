@@ -138,7 +138,7 @@ class WaveformWidget(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         mid = h / 2.0
-        p.fillRect(self.rect(), QColor("#161922"))
+        p.fillRect(self.rect(), QColor("#10121a"))
         vs, span = self._view_start, self._span()
 
         n = len(self._maxs)

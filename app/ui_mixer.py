@@ -70,11 +70,11 @@ CTRL_W = 280
 def _fader_qss(color: str) -> str:
     """Stylesheet per un fader volume con la parte riempita del colore dello stem."""
     return (
-        "QSlider::groove:horizontal{height:4px;background:#2a2e3a;border-radius:2px;}"
-        f"QSlider::sub-page:horizontal{{background:{color};border-radius:2px;}}"
-        "QSlider::handle:horizontal{background:#f3f4f8;width:13px;height:13px;"
-        "margin:-5px 0;border-radius:6px;}"
-        "QSlider::handle:horizontal:hover{background:#ffffff;}"
+        "QSlider::groove:horizontal{height:6px;background:#1a1d26;border-radius:3px;}"
+        f"QSlider::sub-page:horizontal{{background:{color};border-radius:3px;}}"
+        "QSlider::handle:horizontal{background:#ffffff;width:14px;height:14px;"
+        "margin:-4px 0;border-radius:7px;border:1px solid #cdd1de;}"
+        f"QSlider::handle:horizontal:hover{{background:#ffffff;border:2px solid {color};}}"
     )
 
 
@@ -847,34 +847,15 @@ class MixerTab(QWidget):
         self.strips_box = QVBoxLayout()
         self.strips_box.setSpacing(1)
         strips_host = QWidget()
+        strips_host.setObjectName("StripsHost")
         strips_host.setLayout(self.strips_box)
         body.addWidget(strips_host, 1)
 
         self.zoom_scrollbar = QScrollBar(Qt.Orientation.Horizontal)
+        self.zoom_scrollbar.setObjectName("ZoomScrollBar")
         self.zoom_scrollbar.setRange(0, 10000)
         self.zoom_scrollbar.setValue(0)
         self.zoom_scrollbar.setPageStep(10000)
-        self.zoom_scrollbar.setStyleSheet("""
-            QScrollBar:horizontal {
-                border: none;
-                background: #161922;
-                height: 10px;
-                margin: 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #2e3440;
-                min-width: 20px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #434c5e;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-                width: 0px;
-            }
-        """)
         self.zoom_scrollbar.valueChanged.connect(self._on_scrollbar_changed)
         body.addWidget(self.zoom_scrollbar)
 
@@ -972,9 +953,8 @@ class MixerTab(QWidget):
 
         # transport play/stop/tempo
         self.play_btn = QPushButton("▶")
-        self.play_btn.setObjectName("Primary")
+        self.play_btn.setObjectName("PlayButton")
         self.play_btn.setFixedSize(40, 40)
-        self.play_btn.setStyleSheet("border-radius:20px; font-size:16px;")
         self.play_btn.clicked.connect(self._on_play)
         self.stop_btn = QPushButton("■")
         self.stop_btn.setObjectName("GhostMini")

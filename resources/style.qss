@@ -74,9 +74,12 @@ QFrame#Card {
 
 /* Mixer — card di analisi compatte (TONALITÀ / BPM / SCALA …) in alto a destra */
 QFrame#StatCard {
-    background: #161922;
-    border: 1px solid #262a36;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1e2a, stop:1 #13151f);
+    border: 1px solid #252836;
+    border-radius: 12px;
+}
+QFrame#StatCard:hover {
+    border: 1px solid #ff3b5c;
 }
 
 /* Mixer — pannello controlli di una traccia (pannello sinistro) */
@@ -149,12 +152,15 @@ QPushButton {
 /* Pulsantini stretti del mixer (M/S, A/B, Loop, ×, Click): padding minimo
    per non tagliare il testo, indipendente dal padding generale. */
 QPushButton#GhostMini {
-    background: transparent;
-    border: 1px solid #353a48;
+    background: #161822;
+    border: 1px solid #262a35;
     border-radius: 8px;
-    padding: 7px 4px;
+    padding: 6px 4px;
 }
-QPushButton#GhostMini:hover { background: #232733; }
+QPushButton#GhostMini:hover {
+    background: #1f222e;
+    border: 1px solid #ff3b5c;
+}
 QPushButton:hover { background: #323848; }
 QPushButton:pressed { background: #272c38; }
 QPushButton:disabled { color: #5a5f70; background: #20232c; }
@@ -177,37 +183,49 @@ QPushButton#Ghost:hover { background: #232733; }
 /* Slider orizzontali (mixer: velocità, tono, master, pan) */
 QSlider { background: transparent; border: none; }
 QSlider::groove:horizontal {
-    height: 3px;
-    background: #2a2e3a;
+    height: 5px;
+    background: #1a1d26;
     border: none;
-    border-radius: 1px;
+    border-radius: 2.5px;
 }
 QSlider::sub-page:horizontal {
-    background: #565d72;
+    background: #ff3b5c;
     border: none;
-    border-radius: 1px;
+    border-radius: 2.5px;
 }
 QSlider::handle:horizontal {
-    background: #e6e8ee;
+    background: #ffffff;
     width: 12px;
     height: 12px;
-    margin: -5px 0;
+    margin: -3.5px 0;
     border-radius: 6px;
+    border: 1px solid #cdd1de;
 }
-QSlider::handle:horizontal:hover { background: #ffffff; }
-QSlider::handle:horizontal:disabled { background: #5a5f70; }
-QSlider::groove:vertical {
-    width: 3px;
-    background: #2a2e3a;
+QSlider::handle:horizontal:hover {
+    background: #ffffff;
+    border: 2px solid #ff3b5c;
+}
+QSlider::handle:horizontal:disabled {
+    background: #5a5f70;
     border: none;
-    border-radius: 1px;
+}
+QSlider::groove:vertical {
+    width: 5px;
+    background: #1a1d26;
+    border: none;
+    border-radius: 2.5px;
 }
 QSlider::handle:vertical {
-    background: #e6e8ee;
+    background: #ffffff;
     width: 12px;
     height: 12px;
-    margin: 0 -5px;
+    margin: 0 -3.5px;
     border-radius: 6px;
+    border: 1px solid #cdd1de;
+}
+QSlider::handle:vertical:hover {
+    background: #ffffff;
+    border: 2px solid #ff3b5c;
 }
 
 /* Checkbox */
@@ -277,3 +295,49 @@ QScrollBar::handle:vertical {
 QScrollBar::handle:vertical:hover { background: #454b5c; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+/* Mixer — contenitore strisce tracce, i 1px di spacing fungono da bordi/separatori */
+QWidget#StripsHost {
+    background: #1e2230;
+}
+
+/* Mixer — pulsante Play centrale rotondo */
+QPushButton#PlayButton {
+    background: #ff3b5c;
+    border: none;
+    color: #ffffff;
+    border-radius: 20px;
+    font-size: 16px;
+}
+QPushButton#PlayButton:hover {
+    background: #ff5170;
+}
+QPushButton#PlayButton:pressed {
+    background: #e62e4d;
+}
+QPushButton#PlayButton:disabled {
+    background: #5c2a36;
+    color: #b58b94;
+}
+
+/* Mixer — scrollbar orizzontale dello zoom waveform */
+QScrollBar#ZoomScrollBar:horizontal {
+    border: none;
+    background: #10121a;
+    height: 10px;
+    margin: 0px;
+}
+QScrollBar#ZoomScrollBar::handle:horizontal {
+    background: #2e3440;
+    min-width: 20px;
+    border-radius: 5px;
+}
+QScrollBar#ZoomScrollBar::handle:horizontal:hover {
+    background: #434c5e;
+}
+QScrollBar#ZoomScrollBar::add-line:horizontal, QScrollBar#ZoomScrollBar::sub-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+}
+

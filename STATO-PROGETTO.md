@@ -101,6 +101,16 @@ Versione corrente: **1.6.2** (allineata in `app/__init__.py`, `installer/sonora.
   automaticamente (le build dalla 1.6.2 in poi usano Rubberband R3, non il fallback numpy).
 - **Gestione motore stem** (1.6.0→1.6.2): Verifica/Ripara, Disinstalla, Cartella personalizzata,
   fix creazione venv (stdlib venv, niente trampolino uv), auto-riparazione torch.
+- **Fix freeze EQ mixer**: `_apply_eq` (ui_mixer.py) ora calcola l'EQ (FFT full-file) su `QThread`
+  dedicato (`EqWorker`, stesso pattern di `TransformWorker`) invece che sul thread UI al rilascio
+  slider — niente più freeze 100-300ms su brani lunghi.
+- **Test coverage stems.py**: nuovo `tests/test_stems.py` (29 test) su path motore, fix junction 448
+  (`_normalize_pyvenv_home`), disinstallazione robusta, escalation `repair_engine`, path/file stem.
+- **Disinstaller con pulizia dati opzionale**: `installer/sonora.iss` mostra un dialog custom
+  (checkbox) prima della disinstallazione — se spuntato rimuove anche `%APPDATA%/Sonora` (config,
+  cronologia, sessioni) e il motore stem, anche se installato in una cartella personalizzata
+  (`stem_engine_dir` letto da `settings.json`). Nessun dialog in disinstallazione silenziosa
+  (`/VERYSILENT`): di default i dati restano.
 
 ## Note
 - **Log**: `%APPDATA%/Sonora/sonora.log` (rotante, 1MB×4) — crash non gestiti (excepthook),

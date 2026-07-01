@@ -118,6 +118,27 @@ class TransformWorker(QObject):
         self.done.emit(bufs, self._speed, self._semitones)
 
 
+class EqWorker(QObject):
+    """Ricostruisce il buffer EQ (FFT full-file) fuori dal thread UI."""
+
+    done = Signal(int)   # indice traccia
+
+    def __init__(self, engine: MixerEngine, index: int, low: float, mid: float, high: float):
+        super().__init__()
+        self._engine = engine
+        self._index = index
+        self._low = low
+        self._mid = mid
+        self._high = high
+
+    def run(self) -> None:
+        try:
+            self._engine.set_eq(self._index, self._low, self._mid, self._high)
+        except Exception:  # noqa: BLE001
+            pass
+        self.done.emit(self._index)
+
+
 def _export_audio(mix: np.ndarray, sr: int, path: str, fmt: str) -> None:
     """Scrive il mix su file. WAV diretto via soundfile; MP3 via ffmpeg (bin/)."""
     import soundfile as sf
@@ -504,6 +525,9 @@ class TrackStrip(QWidget):
         self.eq_btn.setToolTip("Equalizzatore 3 bande (Bassi / Medi / Alti)")
         self.eq_btn.clicked.connect(self._show_eq)
         self._eq = {"low": 0, "mid": 0, "high": 0}   # dB correnti
+        self._eq_inflight: dict[str, int] = {}
+        self._eq_thread: QThread | None = None
+        self._eq_worker: EqWorker | None = None
         foot.addWidget(self.pan)
         foot.addStretch(1)
         foot.addWidget(self.eq_btn)
@@ -597,9 +621,27 @@ class TrackStrip(QWidget):
         if not sliders:
             return
         self._eq = {k: sl.value() for k, sl in sliders.items()}
-        self.engine.set_eq(self.index, self._eq["low"], self._eq["mid"], self._eq["high"])
         self._refresh_eq_btn()
         self._notify()
+        if self._eq_thread and self._eq_thread.isRunning():
+            return  # _on_eq_done ricontrolla e rilancia se serve
+        self._start_eq_worker()
+
+    def _start_eq_worker(self) -> None:
+        """FFT full-file su thread separato: niente freeze UI al rilascio slider."""
+        self._eq_inflight = dict(self._eq)
+        self._eq_thread = QThread()
+        self._eq_worker = EqWorker(self.engine, self.index, self._eq_inflight["low"],
+                                    self._eq_inflight["mid"], self._eq_inflight["high"])
+        self._eq_worker.moveToThread(self._eq_thread)
+        self._eq_thread.started.connect(self._eq_worker.run)
+        self._eq_worker.done.connect(self._on_eq_done)
+        self._eq_worker.done.connect(self._eq_thread.quit)
+        self._eq_thread.start()
+
+    def _on_eq_done(self, _index: int) -> None:
+        if self._eq != self._eq_inflight:
+            self._start_eq_worker()   # slider mosso durante il calcolo
 
     def state(self) -> dict:
         return {

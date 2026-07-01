@@ -65,3 +65,133 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  RemoveUserDataCheckBox: TNewCheckBox;
+  RemoveUserData: Boolean;
+
+// Pos() cercando a partire da StartPos (Inno Setup non ha PosEx built-in).
+function PosFrom(const SubStr, S: String; StartPos: Integer): Integer;
+var
+  Found: Integer;
+begin
+  if StartPos < 1 then StartPos := 1;
+  if StartPos > Length(S) then begin Result := 0; Exit; end;
+  Found := Pos(SubStr, Copy(S, StartPos, Length(S) - StartPos + 1));
+  if Found = 0 then
+    Result := 0
+  else
+    Result := Found + StartPos - 1;
+end;
+
+// Estrae il valore stringa di una chiave JSON semplice: "key": "value".
+// Basta per leggere stem_engine_dir da settings.json senza un parser JSON completo.
+function ExtractJsonString(const Json, Key: String): String;
+var
+  P, PStart, PEnd: Integer;
+begin
+  Result := '';
+  P := Pos('"' + Key + '"', Json);
+  if P = 0 then Exit;
+  P := PosFrom(':', Json, P);
+  if P = 0 then Exit;
+  P := PosFrom('"', Json, P);
+  if P = 0 then Exit;
+  PStart := P + 1;
+  PEnd := PosFrom('"', Json, PStart);
+  if PEnd = 0 then Exit;
+  Result := Copy(Json, PStart, PEnd - PStart);
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  Form: TSetupForm;
+  Lbl: TNewStaticText;
+  BtnOK, BtnCancel: TNewButton;
+begin
+  RemoveUserData := False;
+  Result := True;
+  if UninstallSilent() then
+    Exit;   // disinstallazione silenziosa (/VERYSILENT): non bloccare su un dialog, tieni i dati
+
+  Form := CreateCustomForm(ScaleX(380), ScaleY(160), False, False);
+  try
+    Form.Caption := 'Disinstalla {#AppName}';
+
+    Lbl := TNewStaticText.Create(Form);
+    Lbl.Parent := Form;
+    Lbl.Left := ScaleX(16);
+    Lbl.Top := ScaleY(16);
+    Lbl.Width := Form.ClientWidth - ScaleX(32);
+    Lbl.Height := ScaleY(70);
+    Lbl.AutoSize := False;
+    Lbl.WordWrap := True;
+    Lbl.Caption :=
+      'Vuoi rimuovere anche i dati utente (impostazioni, cronologia, sessioni ' +
+      'mixer) e il motore di separazione stem (fino a ~3 GB) da %APPDATA%\Sonora?';
+
+    RemoveUserDataCheckBox := TNewCheckBox.Create(Form);
+    RemoveUserDataCheckBox.Parent := Form;
+    RemoveUserDataCheckBox.Left := ScaleX(16);
+    RemoveUserDataCheckBox.Top := Lbl.Top + Lbl.Height + ScaleY(8);
+    RemoveUserDataCheckBox.Width := Form.ClientWidth - ScaleX(32);
+    RemoveUserDataCheckBox.Caption := 'Rimuovi anche dati utente e motore stem (azione irreversibile)';
+    RemoveUserDataCheckBox.Checked := False;
+
+    BtnOK := TNewButton.Create(Form);
+    BtnOK.Parent := Form;
+    BtnOK.Width := ScaleX(75);
+    BtnOK.Height := ScaleY(23);
+    BtnOK.Left := Form.ClientWidth - ScaleX(75) - ScaleX(75) - ScaleX(16) - ScaleX(8);
+    BtnOK.Top := Form.ClientHeight - ScaleY(23) - ScaleY(16);
+    BtnOK.Caption := 'Continua';
+    BtnOK.ModalResult := mrOk;
+    BtnOK.Default := True;
+
+    BtnCancel := TNewButton.Create(Form);
+    BtnCancel.Parent := Form;
+    BtnCancel.Width := ScaleX(75);
+    BtnCancel.Height := ScaleY(23);
+    BtnCancel.Left := Form.ClientWidth - ScaleX(75) - ScaleX(16);
+    BtnCancel.Top := Form.ClientHeight - ScaleY(23) - ScaleY(16);
+    BtnCancel.Caption := 'Annulla';
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Cancel := True;
+
+    Form.ActiveControl := BtnOK;
+    Form.FlipAndCenterIfNeeded(True, nil, False);
+
+    if Form.ShowModal() = mrOk then
+    begin
+      RemoveUserData := RemoveUserDataCheckBox.Checked;
+      Result := True;
+    end
+    else
+      Result := False;
+  finally
+    Form.Free();
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir, SettingsFile, CustomEngineDir: String;
+  JsonText: AnsiString;
+begin
+  if (CurUninstallStep = usPostUninstall) and RemoveUserData then
+  begin
+    DataDir := ExpandConstant('{userappdata}\Sonora');
+    SettingsFile := DataDir + '\settings.json';
+    // Il motore stem può vivere fuori da %APPDATA% se l'utente ha scelto una
+    // cartella personalizzata (impostazione "stem_engine_dir"): rimuovila prima.
+    if FileExists(SettingsFile) and LoadStringFromFile(SettingsFile, JsonText) then
+    begin
+      CustomEngineDir := ExtractJsonString(String(JsonText), 'stem_engine_dir');
+      if (CustomEngineDir <> '') and DirExists(CustomEngineDir + '\stem-engine') then
+        DelTree(CustomEngineDir + '\stem-engine', True, True, True);
+    end;
+    if DirExists(DataDir) then
+      DelTree(DataDir, True, True, True);
+  end;
+end;

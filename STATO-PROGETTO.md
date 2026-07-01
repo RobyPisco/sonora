@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.6.2** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -90,7 +90,7 @@ Versione corrente: **1.6.2** (allineata in `app/__init__.py`, `installer/sonora.
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`
-- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.6.2.exe`
+- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.6.3.exe`
 
 ## DA FARE (idee proposte, scelta utente)
 - **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto" (anche durante

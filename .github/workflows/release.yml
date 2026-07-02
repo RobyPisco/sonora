@@ -102,16 +102,31 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" installer\sonora.iss
 
+      # Checksum pubblicato accanto all'installer: l'auto-update dell'app lo
+      # scarica e verifica l'hash prima di lanciare l'installer (app_update.py).
+      # Formato sha256sum: "<hash minuscolo> *<nomefile>".
+      - name: Genera checksum SHA256 dell'installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist_installer/SonoraSetup-*.exe | Select-Object -First 1
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$($exe.FullName).sha256" -Value "$hash *$($exe.Name)" -Encoding ascii -NoNewline
+          Write-Host "SHA256: $hash  $($exe.Name)"
+
       - name: Carica l'installer come artifact (sempre)
         uses: actions/upload-artifact@v4
         with:
           name: SonoraSetup
-          path: dist_installer/SonoraSetup-*.exe
+          path: |
+            dist_installer/SonoraSetup-*.exe
+            dist_installer/SonoraSetup-*.exe.sha256
 
       - name: Pubblica la Release (solo su tag)
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist_installer/SonoraSetup-*.exe
+          files: |
+            dist_installer/SonoraSetup-*.exe
+            dist_installer/SonoraSetup-*.exe.sha256
           generate_release_notes: true
           fail_on_unmatched_files: true

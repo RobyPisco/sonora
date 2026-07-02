@@ -14,6 +14,9 @@ Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.
   scarica l'installer in `%APPDATA%/Sonora/updates/`, lo lancia e chiude l'app (l'installer Inno Setup
   chiude l'istanza con `CloseApplications=yes`). Anche manuale da tray "Controlla aggiornamenti app".
   Disattivabile con `auto_check_updates: false` in settings.json.
+  **Verifica integrità**: la CI pubblica `SonoraSetup-X.Y.Z.exe.sha256` accanto all'installer; l'updater
+  calcola l'hash SHA256 durante il download e lo confronta prima di lanciare l'installer (mismatch →
+  file scartato, errore). Release senza `.sha256` (≤ 1.6.3): procede senza verifica, warning nel log.
 - **CI release** (`.github/workflows/release.yml`): al push di un tag `vX.Y.Z` builda exe+installer su
   runner Windows e pubblica la Release. **Autosufficiente**: scarica ffmpeg/ffprobe/uv da fonti ufficiali
   (BtbN, astral), nessun `bin/` da fornire. rubberband/sndfile opzionali (fallback numpy); per includerli

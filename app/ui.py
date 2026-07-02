@@ -1276,7 +1276,8 @@ class MainWindow(QWidget):
         self._appupd_progress.setAutoReset(False)
         self._appupd_progress.setValue(0)
         self._appupd_thread, self._appupd_worker = app_update.make_download_thread(
-            info["download_url"], info.get("asset_name", ""))
+            info["download_url"], info.get("asset_name", ""),
+            info.get("sha256_url", ""))
         self._appupd_worker.progress.connect(
             lambda p: self._appupd_progress and self._appupd_progress.setValue(int(p)))
         self._appupd_worker.log.connect(self._log)

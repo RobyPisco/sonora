@@ -15,6 +15,7 @@ Flusso "notifica + download":
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -55,9 +56,31 @@ def _pick_installer_asset(assets: list) -> tuple[str, str, int]:
     Ritorna ("", "", 0) se nessun asset corrisponde."""
     for a in assets or []:
         name = a.get("name") or ""
-        if _INSTALLER_RE.search(name):
+        if _INSTALLER_RE.search(name) and not name.lower().endswith(".sha256"):
             return (a.get("browser_download_url") or "", name, int(a.get("size") or 0))
     return ("", "", 0)
+
+
+def _pick_sha256_asset(assets: list, installer_name: str) -> str:
+    """URL dell'asset `<installer>.sha256` pubblicato accanto all'installer,
+    oppure "" se assente (release precedenti alla 1.6.4 non lo hanno)."""
+    if not installer_name:
+        return ""
+    want = f"{installer_name}.sha256".lower()
+    for a in assets or []:
+        if (a.get("name") or "").lower() == want:
+            return a.get("browser_download_url") or ""
+    return ""
+
+
+def _fetch_expected_sha256(url: str) -> str:
+    """Scarica il file .sha256 e ne estrae l'hash (primo token esadecimale di
+    64 caratteri, formato `sha256sum`: "<hash> *<nomefile>"). "" se non valido."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Sonora"})
+    with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
+        text = r.read(4096).decode("utf-8", errors="replace")
+    m = re.search(r"\b[0-9a-fA-F]{64}\b", text)
+    return m.group(0).lower() if m else ""
 
 
 def check_latest() -> dict | None:
@@ -79,7 +102,8 @@ def check_latest() -> dict | None:
     tag = (data.get("tag_name") or "").lstrip("vV")
     if not tag:
         return None
-    dl_url, asset_name, asset_size = _pick_installer_asset(data.get("assets") or [])
+    assets = data.get("assets") or []
+    dl_url, asset_name, asset_size = _pick_installer_asset(assets)
     return {
         "version": tag,
         "url": data.get("html_url", f"https://github.com/{repo}/releases"),
@@ -87,6 +111,7 @@ def check_latest() -> dict | None:
         "download_url": dl_url,
         "asset_name": asset_name,
         "asset_size": asset_size,
+        "sha256_url": _pick_sha256_asset(assets, asset_name),
     }
 
 
@@ -141,22 +166,32 @@ def make_check_thread() -> tuple[QThread, CheckWorker]:
 
 
 class DownloadInstallerWorker(QObject):
-    """Scarica l'installer dalla release in %APPDATA%/Sonora/updates/."""
+    """Scarica l'installer dalla release in %APPDATA%/Sonora/updates/.
+
+    Se la release pubblica anche `<installer>.sha256` (`sha256_url`), l'hash
+    dell'installer viene verificato prima di considerare il download valido:
+    in caso di mismatch il file viene scartato e il download fallisce.
+    Release senza checksum (precedenti alla 1.6.4): si procede senza verifica,
+    con un avviso nel log.
+    """
 
     progress = Signal(float)        # 0..100
     log = Signal(str)
     finished = Signal(bool, str)    # ok, path_installer_oppure_errore
 
-    def __init__(self, url: str, asset_name: str):
+    def __init__(self, url: str, asset_name: str, sha256_url: str = ""):
         super().__init__()
         self._url = url
         self._name = asset_name or "SonoraSetup.exe"
+        self._sha256_url = sha256_url or ""
 
     def run(self) -> None:
+        log = logging.getLogger("sonora.update")
         try:
             dest = updates_dir() / self._name
             tmp = dest.with_suffix(dest.suffix + ".part")
             self.log.emit(f"Scarico {self._name}…")
+            hasher = hashlib.sha256()
             req = urllib.request.Request(self._url, headers={"User-Agent": "Sonora"})
             with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
                 total = int(resp.headers.get("Content-Length") or 0)
@@ -167,25 +202,41 @@ class DownloadInstallerWorker(QObject):
                         if not chunk:
                             break
                         f.write(chunk)
+                        hasher.update(chunk)
                         done += len(chunk)
                         if total:
                             self.progress.emit(done / total * 100.0)
             if total and done < total * 0.99:
                 raise RuntimeError("download incompleto")
+            if self._sha256_url:
+                expected = _fetch_expected_sha256(self._sha256_url)
+                if not expected:
+                    raise RuntimeError("checksum pubblicato non leggibile")
+                actual = hasher.hexdigest()
+                if actual != expected:
+                    tmp.unlink(missing_ok=True)
+                    log.error("SHA256 mismatch: atteso %s, ottenuto %s", expected, actual)
+                    raise RuntimeError(
+                        "verifica integrità fallita (SHA256 non corrisponde): "
+                        "installer scartato, riprova più tardi")
+                self.log.emit("Integrità verificata (SHA256 ok).")
+            else:
+                log.warning("release senza asset .sha256: installo senza verifica integrità")
             tmp.replace(dest)
             mb = done / 1024 / 1024
             self.log.emit(f"Scaricato {mb:.1f} MB.")
             self.finished.emit(True, str(dest))
         except Exception as exc:  # noqa: BLE001
-            logging.getLogger("sonora.update").exception(
-                "download installer fallito: %s", self._url)
+            log.exception("download installer fallito: %s", self._url)
             msg = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
             self.finished.emit(False, msg)
 
 
-def make_download_thread(url: str, asset_name: str) -> tuple[QThread, DownloadInstallerWorker]:
+def make_download_thread(
+    url: str, asset_name: str, sha256_url: str = "",
+) -> tuple[QThread, DownloadInstallerWorker]:
     thread = QThread()
-    worker = DownloadInstallerWorker(url, asset_name)
+    worker = DownloadInstallerWorker(url, asset_name, sha256_url)
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     worker.finished.connect(thread.quit)

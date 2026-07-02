@@ -35,3 +35,60 @@ def test_pick_installer_asset():
 def test_pick_installer_asset_none():
     assert au._pick_installer_asset([]) == ("", "", 0)
     assert au._pick_installer_asset([{"name": "x.zip"}]) == ("", "", 0)
+
+
+def test_pick_sha256_asset():
+    assets = [
+        {"name": "SonoraSetup-1.6.4.exe", "browser_download_url": "u1", "size": 123},
+        {"name": "SonoraSetup-1.6.4.exe.sha256", "browser_download_url": "u2", "size": 100},
+    ]
+    assert au._pick_sha256_asset(assets, "SonoraSetup-1.6.4.exe") == "u2"
+    # case-insensitive sul nome
+    assert au._pick_sha256_asset(assets, "sonorasetup-1.6.4.EXE") == "u2"
+
+
+def test_pick_sha256_asset_missing():
+    assets = [{"name": "SonoraSetup-1.6.3.exe", "browser_download_url": "u1"}]
+    assert au._pick_sha256_asset(assets, "SonoraSetup-1.6.3.exe") == ""
+    assert au._pick_sha256_asset(assets, "") == ""
+    assert au._pick_sha256_asset([], "SonoraSetup-1.6.3.exe") == ""
+
+
+def test_pick_installer_asset_skips_sha256():
+    """L'asset .sha256 non deve mai essere scambiato per l'installer."""
+    assets = [
+        {"name": "SonoraSetup-1.6.4.exe.sha256", "browser_download_url": "u2", "size": 100},
+        {"name": "SonoraSetup-1.6.4.exe", "browser_download_url": "u1", "size": 123},
+    ]
+    url, name, _size = au._pick_installer_asset(assets)
+    assert url == "u1"
+    assert name == "SonoraSetup-1.6.4.exe"
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, n: int = -1) -> bytes:
+        return self._body if n < 0 else self._body[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_fetch_expected_sha256(monkeypatch):
+    digest = "a" * 64
+    body = f"{digest.upper()} *SonoraSetup-1.6.4.exe\n".encode()
+    monkeypatch.setattr(
+        au.urllib.request, "urlopen", lambda req, timeout=0: _FakeResponse(body))
+    assert au._fetch_expected_sha256("http://x/f.sha256") == digest
+
+
+def test_fetch_expected_sha256_invalid(monkeypatch):
+    monkeypatch.setattr(
+        au.urllib.request, "urlopen",
+        lambda req, timeout=0: _FakeResponse(b"non sono un hash"))
+    assert au._fetch_expected_sha256("http://x/f.sha256") == ""

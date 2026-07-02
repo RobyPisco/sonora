@@ -53,9 +53,15 @@ Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.
   - **scorciatoie** (Spazio/L/Home/A/B/1-6).
 - **Scheda "Testi" (Lyrics Finder)**:
   - Download automatico in background dei testi da **LRCLIB** (API aperta e gratuita) al caricamento dei brani.
-  - Salvataggio locale in `lyrics.txt` per il caricamento offline immediato.
+  - **Karaoke / testi sincronizzati**: se LRCLIB fornisce `syncedLyrics` (formato LRC) viene salvato in
+    `lyrics.lrc` e la scheda evidenzia la riga corrente (arancione, centrata con auto-scroll) seguendo la
+    riproduzione del mixer (segnale `MixerTab.position_changed`, emesso dal `_tick` a ~40ms; l'highlight
+    lavora solo al cambio riga e con scheda visibile). Nei risultati di ricerca manuale i brani
+    sincronizzati sono marcati con 🎤. Parser LRC in `app/ui_lyrics.py::parse_lrc` (testato).
+  - Salvataggio locale in `lyrics.txt` (+ `lyrics.lrc` se sincronizzato) per il caricamento offline immediato.
   - Visualizzazione formattata e centrata (sezioni come `[Chorus]` evidenziate in arancione).
-  - Ricerca manuale dei testi e editor integrato per modificare/salvare correzioni locali.
+  - Ricerca manuale dei testi e editor integrato per modificare/salvare correzioni locali
+    (in modalità karaoke l'editor lavora sul file LRC grezzo, timestamp inclusi).
 - **Accordatore** (dialog dal pulsante "🎼 Accordatore" nel mixer): tono di riferimento A440 / corde
   chitarra+basso e **accordatore dal microfono** (pitch via autocorrelazione FFT, niente Qt nel core).
 - **UI responsive**: la scheda Scarica passa da due colonne (largo) a colonna unica impilata (< 900 px),

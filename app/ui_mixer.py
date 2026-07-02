@@ -692,6 +692,7 @@ class MixerTab(QWidget):
     """Scheda mixer completa."""
 
     song_loaded = Signal(str)
+    position_changed = Signal(float)   # posizione playback in secondi (dal _tick)
 
     def __init__(self):
         super().__init__()
@@ -1821,6 +1822,7 @@ class MixerTab(QWidget):
         dur = self.engine.duration()
         pos = self.engine.position()
         frac = (pos / dur) if dur else 0.0
+        self.position_changed.emit(pos)
         for s in self.strips:
             s.wave.set_progress(frac)
             any_solo = any(st.s_btn.isChecked() for st in self.strips)

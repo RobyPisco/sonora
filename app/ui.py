@@ -502,6 +502,7 @@ class MainWindow(QWidget):
         self.mixer_tab = MixerTab()
         self.lyrics_tab = LyricsTab(self)
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
+        self.mixer_tab.position_changed.connect(self.lyrics_tab.set_position)
         self.tabs.addTab(dl_tab, "Scarica")
         self._mixer_index = self.tabs.addTab(self.mixer_tab, "Mixer")
         self.tabs.addTab(self.lyrics_tab, "Testi")

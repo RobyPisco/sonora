@@ -56,18 +56,41 @@ jobs:
           Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffmpeg.exe  | Select-Object -First 1).FullName bin/
           Copy-Item (Get-ChildItem _bindl/ffmpeg -Recurse -Filter ffprobe.exe | Select-Object -First 1).FullName bin/
 
-          # rubberband (opzionale): se esiste una release "deps" con uno zip, includilo.
-          # gh esce con codice !=0 se la release/asset non esiste: lo azzeriamo perché
-          # è best-effort e NON deve far fallire lo step (il LASTEXITCODE residuo di un
-          # comando nativo farebbe fallire l'intero step pwsh).
+          # rubberband: prima prova l'override manuale (release "deps"), altrimenti
+          # scarica dalle fonti ufficiali (Breakfast Quay + libsndfile). Best-effort:
+          # se qualcosa fallisce l'app usa il fallback numpy, la build NON si ferma.
+          # gh esce con codice !=0 se la release/asset non esiste: lo azzeriamo (il
+          # LASTEXITCODE residuo di un comando nativo farebbe fallire lo step pwsh).
           gh release download deps --repo $env:GITHUB_REPOSITORY --pattern "rubberband*.zip" --dir _bindl 2>$null
           $global:LASTEXITCODE = 0
           $rb = Get-ChildItem _bindl -Filter "rubberband*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($rb) {
             Expand-Archive $rb.FullName -DestinationPath bin -Force
-            Write-Host "rubberband incluso da release deps."
+            Write-Host "rubberband incluso da release deps (override manuale)."
           } else {
-            Write-Host "rubberband non fornito: l'app userà il fallback numpy."
+            try {
+              Invoke-WebRequest "https://breakfastquay.com/files/releases/rubberband-3.3.0-gnu-w64.zip" -OutFile _bindl/rb.zip
+              Expand-Archive _bindl/rb.zip -DestinationPath _bindl/rb -Force
+              Get-ChildItem _bindl/rb -Recurse -Include rubberband.exe, rubberband-r3.exe |
+                ForEach-Object { Copy-Item $_.FullName bin/ }
+              Invoke-WebRequest "https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip" -OutFile _bindl/snd.zip
+              Expand-Archive _bindl/snd.zip -DestinationPath _bindl/snd -Force
+              Copy-Item (Get-ChildItem _bindl/snd -Recurse -Filter sndfile.dll | Select-Object -First 1).FullName bin/
+              Write-Host "rubberband + sndfile scaricati dalle fonti ufficiali."
+            } catch {
+              Write-Host "download rubberband fallito ($_): l'app userà il fallback numpy."
+            }
+          }
+
+          # Smoke test: se rubberband.exe non parte (es. DLL mancante) rimuovilo,
+          # così l'app installata usa il fallback numpy invece di fallire a runtime.
+          if (Test-Path bin/rubberband.exe) {
+            & bin/rubberband.exe --version 2>&1 | Out-String | Write-Host
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "rubberband.exe non funzionante: lo escludo dalla build."
+              Remove-Item bin/rubberband*.exe -Force
+            }
+            $global:LASTEXITCODE = 0
           }
 
           Write-Host "--- bin/ ---"

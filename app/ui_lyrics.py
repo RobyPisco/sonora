@@ -16,7 +16,7 @@ import urllib.request
 from bisect import bisect_right
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QEvent, Qt, QThread, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -65,16 +65,42 @@ def parse_lrc(text: str) -> list[tuple[float, str]]:
     return out
 
 
+def pick_best_lyrics(data: list, duration: float = 0.0) -> dict | None:
+    """Sceglie il risultato LRCLIB migliore per il brano.
+
+    Criteri (in ordine): durata vicina a quella del brano (entro 3s, poi 15s),
+    presenza di testo sincronizzato, scarto di durata minimo. Con duration=0
+    (sconosciuta) conta solo il sincronizzato. None se nessun risultato ha testo."""
+    best: tuple | None = None
+    best_item: dict | None = None
+    for item in data or []:
+        plain = (item.get("plainLyrics") or "").strip()
+        synced = (item.get("syncedLyrics") or "").strip()
+        if not plain and not synced:
+            continue
+        d = float(item.get("duration") or 0)
+        if duration > 0 and d > 0:
+            diff = abs(d - duration)
+            bucket = 0 if diff <= 3 else (1 if diff <= 15 else 2)
+        else:
+            diff, bucket = 999.0, 2
+        key = (bucket, 0 if synced else 1, diff)
+        if best is None or key < best:
+            best, best_item = key, item
+    return best_item
+
+
 class LyricsWorker(QThread):
     """Worker in background per cercare e scaricare i testi da LRCLIB."""
 
     # success, plain_text_or_error, synced_lrc (può essere ""), search_results
     done = Signal(bool, str, str, list)
 
-    def __init__(self, query: str, search_only: bool = False):
+    def __init__(self, query: str, search_only: bool = False, duration: float = 0.0):
         super().__init__()
         self.query = query
         self.search_only = search_only
+        self.duration = duration   # durata del brano nel mixer (s), 0 = ignota
 
     def run(self) -> None:
         url = "https://lrclib.net/api/search?" + urllib.parse.urlencode({"q": self.query})
@@ -91,21 +117,13 @@ class LyricsWorker(QThread):
                     self.done.emit(True, "", "", data)
                     return
 
-                # Preferisci il primo risultato con testo sincronizzato; in
-                # mancanza, il primo con testo semplice non vuoto.
-                best_plain: dict | None = None
-                for item in data:
-                    plain = (item.get("plainLyrics") or "").strip()
-                    synced = (item.get("syncedLyrics") or "").strip()
-                    if synced:
-                        self.done.emit(True, plain or synced, synced, data)
-                        return
-                    if plain and best_plain is None:
-                        best_plain = item
-                if best_plain is not None:
-                    self.done.emit(True, best_plain["plainLyrics"], "", data)
+                item = pick_best_lyrics(data, self.duration)
+                if item is None:
+                    self.done.emit(False, "Testo non disponibile nei risultati trovati.", "", data)
                     return
-                self.done.emit(False, "Testo non disponibile nei risultati trovati.", "", data)
+                plain = (item.get("plainLyrics") or "").strip()
+                synced = (item.get("syncedLyrics") or "").strip()
+                self.done.emit(True, plain or synced, synced, data)
         except Exception as e:
             self.done.emit(False, f"Errore di rete: {e}", "", [])
 
@@ -113,12 +131,15 @@ class LyricsWorker(QThread):
 class LyricsTab(QWidget):
     """Scheda Testi: visualizza, scarica e permette di modificare i testi dei brani."""
 
+    seek_requested = Signal(float)   # click su una riga karaoke → seek (secondi)
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.current_folder = ""
         self._worker: LyricsWorker | None = None
         self._search_results: list = []
         self._is_editing = False
+        self._duration = 0.0   # durata del brano corrente (s), per il match LRCLIB
         # stato karaoke (testo sincronizzato)
         self._synced: list[tuple[float, str]] = []
         self._times: list[float] = []
@@ -177,6 +198,8 @@ class LyricsTab(QWidget):
             }
         """)
         self.text_edit.setFont(QFont("Segoe UI", 12))
+        # click su una riga in modalità karaoke = seek nel brano
+        self.text_edit.viewport().installEventFilter(self)
         self.splitter.addWidget(self.text_edit)
 
         # Lista risultati ricerca (nascosta di default)
@@ -205,12 +228,14 @@ class LyricsTab(QWidget):
         # Imposta proporzioni iniziali splitter
         self.splitter.setSizes([600, 200])
 
-    def load_song_lyrics(self, folder: str) -> None:
+    def load_song_lyrics(self, folder: str, duration: float = 0.0) -> None:
         """Carica il testo locale (se esiste) o tenta il download automatico.
 
         Priorità: `lyrics.lrc` (sincronizzato, modalità karaoke) → `lyrics.txt`
-        (statico) → download automatico da LRCLIB."""
+        (statico) → download automatico da LRCLIB. `duration` (s) affina il
+        match su LRCLIB (scarta risultati con durata lontana dal brano)."""
         self.current_folder = folder
+        self._duration = max(0.0, duration or 0.0)
         self._is_editing = False
         self.edit_btn.setChecked(False)
         self.edit_btn.setText("Modifica")
@@ -265,7 +290,7 @@ class LyricsTab(QWidget):
             self._worker.terminate()
             self._worker.wait()
 
-        self._worker = LyricsWorker(song_name, search_only=False)
+        self._worker = LyricsWorker(song_name, search_only=False, duration=self._duration)
         self._worker.done.connect(self._on_auto_download_done)
         self._worker.start()
 
@@ -327,6 +352,20 @@ class LyricsTab(QWidget):
         self._times = []
         self._current_line = -1
         self._synced_active = False
+        self.text_edit.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (API Qt)
+        """Click sinistro su una riga karaoke → seek a quel timestamp."""
+        if (obj is self.text_edit.viewport()
+                and event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._synced_active and not self._is_editing):
+            cursor = self.text_edit.cursorForPosition(event.position().toPoint())
+            idx = cursor.blockNumber()
+            if 0 <= idx < len(self._synced):
+                self.seek_requested.emit(self._synced[idx][0])
+            return True   # niente spostamento del caret
+        return super().eventFilter(obj, event)
 
     @staticmethod
     def _char_fmt(current: bool) -> QTextCharFormat:
@@ -360,6 +399,7 @@ class LyricsTab(QWidget):
             cursor.setBlockFormat(block_fmt)
             cursor.insertText(line or "♪", normal)
         self.text_edit.verticalScrollBar().setValue(0)
+        self.text_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_position(self, seconds: float) -> None:
         """Aggiorna l'evidenziazione karaoke alla posizione di playback (s).
@@ -491,6 +531,7 @@ class LyricsTab(QWidget):
             self._is_editing = True
             self.edit_btn.setText("Salva")
             self.text_edit.setReadOnly(False)
+            self.text_edit.viewport().setCursor(Qt.CursorShape.IBeamCursor)
 
             if src.exists():
                 try:

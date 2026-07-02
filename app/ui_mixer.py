@@ -691,7 +691,7 @@ class TrackStrip(QWidget):
 class MixerTab(QWidget):
     """Scheda mixer completa."""
 
-    song_loaded = Signal(str)
+    song_loaded = Signal(str, float)   # cartella, durata brano in secondi
     position_changed = Signal(float)   # posizione playback in secondi (dal _tick)
 
     def __init__(self):
@@ -1159,7 +1159,7 @@ class MixerTab(QWidget):
         except Exception:  # noqa: BLE001
             pass
 
-        self.song_loaded.emit(folder)
+        self.song_loaded.emit(folder, self.engine.duration())
 
     def _build_strips(self, files: list[tuple[str, str]]) -> None:
         # svuota
@@ -1817,6 +1817,10 @@ class MixerTab(QWidget):
             self.loop_btn.setStyleSheet(
                 "background:#3ddc84;color:#14161c;" if on else "")
             self._apply_loop()
+
+    def seek_seconds(self, seconds: float) -> None:
+        """Seek assoluto in secondi (usato dal click sulle righe karaoke)."""
+        self.engine.seek(max(0.0, seconds))
 
     def _tick(self) -> None:
         dur = self.engine.duration()

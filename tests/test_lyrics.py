@@ -1,6 +1,6 @@
-"""Test del parser LRC per i testi sincronizzati (modalità karaoke)."""
+"""Test del parser LRC e della scelta risultati LRCLIB (modalità karaoke)."""
 
-from app.ui_lyrics import parse_lrc
+from app.ui_lyrics import parse_lrc, pick_best_lyrics
 
 
 def test_parse_lrc_basic():
@@ -43,3 +43,44 @@ def test_parse_lrc_ordina_per_tempo():
 def test_parse_lrc_vuoto():
     assert parse_lrc("") == []
     assert parse_lrc(None) == []
+
+
+def _item(name, plain="testo", synced="", duration=0):
+    return {"trackName": name, "plainLyrics": plain,
+            "syncedLyrics": synced, "duration": duration}
+
+
+def test_pick_best_preferisce_durata_vicina():
+    """Brano da 200s: il risultato a 201s vince su quello a 350s anche se
+    quest'ultimo è sincronizzato (durata lontana = probabile brano sbagliato)."""
+    data = [
+        _item("sbagliato", synced="[00:01.00] x", duration=350),
+        _item("giusto", duration=201),
+    ]
+    assert pick_best_lyrics(data, 200)["trackName"] == "giusto"
+
+
+def test_pick_best_synced_a_parita_di_durata():
+    data = [
+        _item("plain", duration=200),
+        _item("sync", synced="[00:01.00] x", duration=201),
+    ]
+    assert pick_best_lyrics(data, 200)["trackName"] == "sync"
+
+
+def test_pick_best_senza_durata_vince_synced():
+    data = [
+        _item("plain", duration=350),
+        _item("sync", synced="[00:01.00] x", duration=350),
+    ]
+    assert pick_best_lyrics(data, 0)["trackName"] == "sync"
+
+
+def test_pick_best_scarta_risultati_vuoti():
+    data = [
+        _item("vuoto", plain="", synced="", duration=200),
+        _item("pieno", duration=200),
+    ]
+    assert pick_best_lyrics(data, 200)["trackName"] == "pieno"
+    assert pick_best_lyrics([_item("vuoto", plain="")], 200) is None
+    assert pick_best_lyrics([], 200) is None

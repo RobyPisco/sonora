@@ -153,10 +153,41 @@ def install_roformer(log_cb: LogCb, cancel: Cancel) -> bool:
 
 def _env() -> dict[str, str]:
     e = dict(os.environ)
+    # Il motore è un Python 3.12 (venv) lanciato dall'app. Quando l'app gira
+    # "congelata" (PyInstaller) è un Python 3.14: se una qualunque variabile
+    # inietta il suo runtime nel sys.path del venv, all'import di torch il child
+    # carica per errore i .pyd/DLL 3.14 e crasha con
+    # «Module use of python314.dll conflicts with this version of Python» (exit 1).
+    # Rimuovi ogni possibile fonte di contaminazione e isola l'ambiente.
+    for k in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+              "__PYVENV_LAUNCHER__"):
+        e.pop(k, None)
+    e["PYTHONNOUSERSITE"] = "1"
+    # togli dal PATH la cartella del bundle PyInstaller (contiene DLL 3.14)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        mp = os.path.normcase(os.path.abspath(meipass))
+        parts = [p for p in e.get("PATH", "").split(os.pathsep) if p]
+        kept = [p for p in parts
+                if not os.path.normcase(os.path.abspath(p)).startswith(mp)]
+        e["PATH"] = os.pathsep.join(kept)
     e["TORCH_HOME"] = str(_torch_home())          # contiene i checkpoint dei modelli
     e["UV_PYTHON_INSTALL_DIR"] = str(engine_dir() / "python")
     e["PYTHONUTF8"] = "1"
     return e
+
+
+def _safe_cwd() -> str | None:
+    """Working-dir sicura per i subprocess del motore.
+
+    `python -m demucs` mette la cwd in testa a `sys.path`: se la cwd fosse la
+    cartella del bundle PyInstaller (piena di .pyd di Python 3.14) il venv 3.12
+    caricherebbe l'estensione sbagliata → crash all'import (exit 1). Forziamo la
+    cartella del motore, che non contiene moduli Python top-level che possano
+    fare ombra alla stdlib/demucs.
+    """
+    d = engine_dir()
+    return str(d) if d.exists() else None
 
 
 # ---------------- rilevamento GPU ----------------
@@ -179,7 +210,7 @@ def _stream(cmd: list[str], on_text: Callable[[str], None], cancel: Cancel) -> i
     """
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        bufsize=0, env=_env(), creationflags=_NO_WINDOW,
+        bufsize=0, env=_env(), creationflags=_NO_WINDOW, cwd=_safe_cwd(),
     )
     buf = b""
     try:
@@ -626,6 +657,8 @@ def _run_roformer(src: Path, out_format: str,
     models.mkdir(parents=True, exist_ok=True)
     log_cb(f"Separo «{src.stem}» — Roformer ({ROFORMER_MODEL})…")
 
+    tail: list[str] = []
+
     def on_text(line: str) -> None:
         m = _PCT.search(line)
         if m:
@@ -633,58 +666,112 @@ def _run_roformer(src: Path, out_format: str,
                 progress_cb(float(m.group(1)))
             except ValueError:
                 pass
+        else:
+            tail.append(line)
+            del tail[:-15]
 
     rc = _stream([str(venv_python()), script, str(src), str(out_dir),
                   str(models), ROFORMER_MODEL, out_format], on_text, cancel)
     if rc == -1:
         raise RuntimeError("annullato")
     if rc != 0:
-        raise RuntimeError(f"Roformer uscito con codice {rc}")
+        for line in tail[-6:]:            # porta il vero errore nel log
+            log_cb(line)
+        detail = _last_error_line(tail)
+        raise RuntimeError(f"Roformer: {detail}" if detail
+                           else f"Roformer uscito con codice {rc}")
     return out_dir
+
+
+_OOM_HINTS = ("out of memory", "cuda error", "cublas", "cudnn", "cuda out",
+              "not enough memory", "allocat")
+
+
+def _last_error_line(lines: list[str]) -> str:
+    """Miglior riga diagnostica dall'output catturato (ultima riga significativa,
+    tipicamente il messaggio d'eccezione di demucs/torch)."""
+    for line in reversed(lines):
+        s = line.strip()
+        if s and not s.startswith(("|", "#", "0%", "100%")):
+            return s[:200]
+    return ""
 
 
 def _run_demucs(src: Path, model: str, out_format: str, two_stems: bool,
                 log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> Path:
     """Esegue demucs per un modello. Ritorna la cartella con gli stem prodotti."""
-    device = "cuda" if has_nvidia() else "cpu"
+    gpu = has_nvidia()
     tmp_out = engine_dir() / "_out"
     out_model = tmp_out / model
-    cmd = [str(venv_python()), "-m", "demucs", "-n", model, "-d", device,
-           "-o", str(tmp_out)]
-    # Qualità: più sovrapposizione = meno artefatti ai bordi dei segmenti.
-    # --shifts media più passate sfasate (guadagno reale ma ~Nx tempo): solo su
-    # GPU, su CPU sarebbe troppo lento.
-    cmd += ["--overlap", "0.5"]
-    if device == "cuda":
-        cmd += ["--shifts", "2"]
-    if two_stems:
-        cmd += ["--two-stems", "vocals"]
-    if out_format == "flac":
-        cmd += ["--flac"]
-    elif out_format == "mp3":
-        cmd += ["--mp3", "--mp3-bitrate", "320"]
 
-    def run(extra: list[str]) -> int:
-        full = cmd + extra + [str(src)]
+    base = [str(venv_python()), "-m", "demucs", "-n", model, "-o", str(tmp_out),
+            # più sovrapposizione = meno artefatti ai bordi dei segmenti
+            "--overlap", "0.5"]
+    if two_stems:
+        base += ["--two-stems", "vocals"]
+    if out_format == "flac":
+        base += ["--flac"]
+    elif out_format == "mp3":
+        base += ["--mp3", "--mp3-bitrate", "320"]
+
+    # Tentativi dal migliore (qualità/velocità) al più robusto (memoria). Su GPU
+    # con poca VRAM (es. 6 GB condivisi col desktop) htdemucs va in "CUDA out of
+    # memory": si degrada gradualmente e, come ultima spiaggia, si ripiega su CPU
+    # (lento ma non tocca la VRAM) invece di fallire del tutto.
+    #   --shifts media più passate sfasate (qualità, ~Nx tempo, solo GPU).
+    #   --segment corto abbassa il picco di VRAM (htdemucs: max ~7.8s).
+    if gpu:
+        attempts = [
+            ("cuda", ["-d", "cuda", "--shifts", "2"], ""),
+            ("cuda", ["-d", "cuda", "--segment", "4"],
+             "Poca memoria GPU: riprovo con segmenti più corti…"),
+            ("cpu", ["-d", "cpu"],
+             "GPU insufficiente: ripiego sulla CPU (più lento ma affidabile)…"),
+        ]
+    else:
+        attempts = [("cpu", ["-d", "cpu"], "")]
+
+    tail: list[str] = []
+    rc = 1
+    for device, extra, notice in attempts:
+        if cancel():
+            rc = -1
+            break
+        if notice:
+            log_cb(notice)
+        if out_model.exists():
+            shutil.rmtree(out_model, ignore_errors=True)
+        tail = []
         log_cb(f"Separo «{src.stem}» — {model} su {device.upper()}…")
 
-        def on_text(line: str) -> None:
+        def on_text(line: str, _tail: list[str] = tail) -> None:
             m = _PCT.search(line)
             if m:
                 try:
                     progress_cb(float(m.group(1)))
                 except ValueError:
                     pass
-        return _stream(full, on_text, cancel)
+            else:
+                # conserva le ultime righe non-progresso per diagnosticare i crash
+                _tail.append(line)
+                del _tail[:-15]
 
-    rc = run([])
-    if rc != 0 and not cancel():
-        log_cb("Riprovo con segmenti ridotti (memoria)…")
-        rc = run(["--segment", "7"])
+        rc = _stream(base + extra + [str(src)], on_text, cancel)
+        if rc in (0, -1):
+            break
+        # continua coi ripieghi solo se è davvero un problema di memoria/CUDA;
+        # per altri errori insistere è inutile (mostra subito la causa vera)
+        if not any(h in " ".join(tail).lower() for h in _OOM_HINTS):
+            break
+
     if rc == -1:
         raise RuntimeError("annullato")
     if rc != 0:
-        raise RuntimeError(f"demucs uscito con codice {rc}")
+        for line in tail[-6:]:            # porta il vero errore nel log
+            log_cb(line)
+        detail = _last_error_line(tail)
+        raise RuntimeError(f"demucs: {detail}" if detail
+                           else f"demucs uscito con codice {rc}")
 
     produced = out_model / src.stem
     if not produced.exists():

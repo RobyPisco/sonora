@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.6.4** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.6.5** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -113,6 +113,15 @@ Versione corrente: **1.6.4** (allineata in `app/__init__.py`, `installer/sonora.
   l'auto-update). Certificato OV ~100-400€/anno. (Rimandato: nessuna firma per ora.)
 
 ## Fatto di recente
+- **Fix stem "demucs codice 1" (1.6.5)**: il subprocess del motore veniva lanciato senza `cwd`
+  esplicito → se la working-dir era la cartella del bundle PyInstaller (piena di `.pyd` di
+  Python 3.14), `python -m demucs` avvelenava `sys.path` e il venv 3.12 crashava all'import di torch
+  («Module use of python314.dll conflicts», exit 1 in ~2s). Ora `_stream` forza `cwd=engine_dir`
+  (`_safe_cwd`) e `_env` ripulisce `PYTHONPATH`/`PYTHONHOME` e toglie `sys._MEIPASS` dal `PATH`.
+  Inoltre: `_run_demucs`/`_run_roformer` **catturano e mostrano il vero errore** (basta "codice 1"
+  muto) e il retry ora riduce davvero la VRAM (`--segment 4`, niente `--shifts`) con **fallback su
+  CPU** come ultima spiaggia (utile su GPU con poca memoria, es. GTX 1660 6 GB). Include anche il
+  fix `update_repo` vuoto nei settings vecchi (era post-1.6.4, non arrivava alla build installata).
 - **Rubberband nelle build CI**: caricato `rubberband-win64.zip` nella release `deps` → la CI lo include
   automaticamente (le build dalla 1.6.2 in poi usano Rubberband R3, non il fallback numpy).
 - **Gestione motore stem** (1.6.0→1.6.2): Verifica/Ripara, Disinstalla, Cartella personalizzata,

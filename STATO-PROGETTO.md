@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.6.4** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -19,8 +19,10 @@ Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.
   file scartato, errore). Release senza `.sha256` (≤ 1.6.3): procede senza verifica, warning nel log.
 - **CI release** (`.github/workflows/release.yml`): al push di un tag `vX.Y.Z` builda exe+installer su
   runner Windows e pubblica la Release. **Autosufficiente**: scarica ffmpeg/ffprobe/uv da fonti ufficiali
-  (BtbN, astral), nessun `bin/` da fornire. rubberband/sndfile opzionali (fallback numpy); per includerli
-  carica `rubberband-win64.zip` in una release tag `deps` (vedi `tools/make-bin-zip.ps1`). Il tag deve
+  (BtbN, astral), nessun `bin/` da fornire. **rubberband/sndfile inclusi di default** (scaricati da
+  Breakfast Quay + libsndfile ufficiali, con smoke test `--version`: se l'exe non parte viene escluso e
+  l'app usa il fallback numpy); una release tag `deps` con `rubberband-win64.zip` fa da override manuale
+  (vedi `tools/make-bin-zip.ps1`). Il tag deve
   combaciare con `__version__` in `app/__init__.py`. Avvio manuale (`workflow_dispatch`) = build di prova
   senza pubblicare, con l'installer caricato come artifact.
 - **Separazione stem**: click destro / "Separa file…" / drag. Modalità:
@@ -58,6 +60,11 @@ Versione corrente: **1.6.3** (allineata in `app/__init__.py`, `installer/sonora.
     riproduzione del mixer (segnale `MixerTab.position_changed`, emesso dal `_tick` a ~40ms; l'highlight
     lavora solo al cambio riga e con scheda visibile). Nei risultati di ricerca manuale i brani
     sincronizzati sono marcati con 🎤. Parser LRC in `app/ui_lyrics.py::parse_lrc` (testato).
+    **Click su una riga karaoke = seek** a quel punto del brano (segnale `seek_requested` →
+    `MixerTab.seek_seconds`; cursore a manina in modalità karaoke).
+  - **Match LRCLIB per durata**: `song_loaded` ora porta anche la durata del brano; tra i risultati
+    di ricerca vince quello con durata vicina (±3s, poi ±15s), a parità il sincronizzato
+    (`pick_best_lyrics`, testato). Evita di scaricare il testo del brano sbagliato.
   - Salvataggio locale in `lyrics.txt` (+ `lyrics.lrc` se sincronizzato) per il caricamento offline immediato.
   - Visualizzazione formattata e centrata (sezioni come `[Chorus]` evidenziate in arancione).
   - Ricerca manuale dei testi e editor integrato per modificare/salvare correzioni locali

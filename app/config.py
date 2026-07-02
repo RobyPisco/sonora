@@ -55,6 +55,10 @@ def load() -> dict[str, Any]:
                 cfg.update({k: v for k, v in data.items() if k in DEFAULTS})
         except (json.JSONDecodeError, OSError):
             pass
+    # migrazione: i settings salvati prima della 1.5.4 hanno update_repo=""
+    # (l'auto-update non esisteva) e il vuoto vincerebbe sul default per sempre
+    if not (cfg.get("update_repo") or "").strip():
+        cfg["update_repo"] = DEFAULTS["update_repo"]
     return cfg
 
 

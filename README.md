@@ -2,7 +2,7 @@
 
 **Italiano** · [English](#english)
 
-![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.6.3-orange)
+![python](https://img.shields.io/badge/python-3.14-blue) ![gui](https://img.shields.io/badge/GUI-PySide6-green) ![version](https://img.shields.io/badge/versione-1.0.0-orange)
 
 App desktop Windows per **scaricare audio da YouTube**, **separarlo in stem** e **esercitarsi** sui brani con un mixer di pratica, visualizzatore di testi e un accordatore. Tutto in locale.
 
@@ -44,6 +44,10 @@ App desktop Windows per **scaricare audio da YouTube**, **separarlo in stem** e 
 **Accordatore**
 - Tono di riferimento **A440** e per **corde di chitarra/basso**, più **accordatore dal microfono** (rilevamento del pitch in tempo reale).
 
+**Licenza**
+- **Prova gratuita di 3 giorni**, poi l'app richiede un **codice di attivazione** (uno per cliente).
+- Attivazione online una-tantum, poi funziona **offline**; ogni codice è valido su **un solo PC**.
+
 **Interfaccia**
 - Layout **responsive**: due colonne su schermi larghi, colonna unica su monitor piccoli.
 
@@ -65,7 +69,7 @@ Output: `dist/Sonora/Sonora.exe` (distribuisci l'intera cartella `dist/Sonora/`)
 1. Installa [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Fai la build PyInstaller (sopra).
 3. Compila: `ISCC.exe installer\sonora.iss`
-4. Output: `dist_installer\SonoraSetup-1.6.3.exe`
+4. Output: `dist_installer\SonoraSetup-1.0.0.exe`
 
 ## Motore stem (isolato)
 PyTorch non ha wheel CUDA per Python 3.14, quindi al primo uso Sonora crea un motore isolato (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. Download una-tantum **~3 GB**. Su PC senza GPU usa la CPU (più lento). I modelli Roformer (~centinaia di MB) si scaricano al primo uso in `%APPDATA%/Sonora/separator-models/`.
@@ -143,6 +147,10 @@ Windows desktop app to **download audio from YouTube**, **split it into stems** 
 **Tuner**
 - **A440** and **guitar/bass string** reference tones, plus a **microphone tuner** (real-time pitch detection).
 
+**License**
+- **3-day free trial**, then the app requires an **activation code** (one per customer).
+- One-time online activation, then works **offline**; each code is valid on **a single PC**.
+
 **UI**
 - **Responsive** layout: two columns on wide screens, single column on small monitors.
 
@@ -163,7 +171,7 @@ Output: `dist/Sonora/Sonora.exe` (ship the whole `dist/Sonora/` folder).
 ## Installer (optional)
 1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php).
 2. Run the PyInstaller build (above).
-3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.6.3.exe`.
+3. Compile: `ISCC.exe installer\sonora.iss` → `dist_installer\SonoraSetup-1.0.0.exe`.
 
 ## Stem engine (isolated)
 PyTorch has no CUDA wheel for Python 3.14, so on first use Sonora builds an isolated engine (**Python 3.12 + PyTorch CUDA + Demucs + audio-separator + librosa**) in `%APPDATA%/Sonora/stem-engine/` via `bin/uv.exe`. One-time **~3 GB** download. Falls back to CPU without a GPU. Roformer models download on first use to `%APPDATA%/Sonora/separator-models/`.

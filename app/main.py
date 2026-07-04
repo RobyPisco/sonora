@@ -33,6 +33,15 @@ def main() -> int:
         css = css.replace("__CHEVRON__", paths.resource("chevron.svg").as_posix())
         app.setStyleSheet(css)
 
+    # gate licenza: durante la prova (3 giorni) o con licenza valida si prosegue;
+    # a prova scaduta serve un codice, altrimenti l'app non parte.
+    from . import licensing
+    from .ui_license import run_activation_gate
+
+    if licensing.status().state == "expired":
+        if not run_activation_gate(trial_expired=True):
+            return 0
+
     win = MainWindow()
     if icon_path.exists():
         win.setWindowIcon(QIcon(str(icon_path)))

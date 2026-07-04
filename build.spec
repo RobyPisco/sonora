@@ -81,7 +81,8 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=["yt_dlp", "psutil", "numpy", "soundfile", "sounddevice",
-                   "cffi", "_cffi_backend"],
+                   "cffi", "_cffi_backend", "cryptography",
+                   "cryptography.hazmat.bindings._rust"],
     hookspath=[],
     runtime_hooks=[],
     excludes=[

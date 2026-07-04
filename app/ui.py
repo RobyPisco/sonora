@@ -468,6 +468,23 @@ class MainWindow(QWidget):
         if app_update.auto_check_enabled() and app_update.configured_repo():
             QTimer.singleShot(2500, lambda: self._start_update_check(verbose=False))
 
+        # rinnovo silenzioso del token di licenza (revoca/scadenza), in background
+        QTimer.singleShot(3500, self._refresh_license)
+
+    def _refresh_license(self) -> None:
+        # su thread separato: refresh_if_needed può fare rete (timeout) e non
+        # deve bloccare la UI. Non tocca oggetti Qt, quindi è sicuro.
+        import threading
+
+        def _work() -> None:
+            try:
+                from . import licensing
+                licensing.refresh_if_needed()
+            except Exception:  # noqa: BLE001 (best-effort)
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
     # ---------- costruzione UI ----------
 
     def _build_ui(self) -> None:
@@ -483,7 +500,16 @@ class MainWindow(QWidget):
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(16, 4, 16, 4)
         fl.setSpacing(10)
-        brand = QLabel(f"Sonora v{__version__}  ·  © 2026 Pisco Factory")
+        brand_text = f"Sonora v{__version__}  ·  © 2026 Pisco Factory"
+        try:
+            from . import licensing
+            st = licensing.status()
+            if st.state == "trial":
+                giorni = "1 giorno" if st.days_left == 1 else f"{st.days_left} giorni"
+                brand_text += f"  ·  Prova: {giorni}"
+        except Exception:  # noqa: BLE001 (il banner non deve mai bloccare la UI)
+            pass
+        brand = QLabel(brand_text)
         brand.setStyleSheet("color:#6b7080; font-size:11px;")
         disclaimer = QLabel("Usa solo contenuti di cui detieni i diritti.")
         disclaimer.setStyleSheet("color:#565b6b; font-size:11px; font-style:italic;")

@@ -1,0 +1,14 @@
+name = "sonora-license"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# KV namespace per codici e macchine.
+# Crea il namespace e incolla qui l'id restituito:
+#   wrangler kv namespace create LICENSES
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "46ec354785e94d40bee97fbcfeb56384"
+
+# I secret NON vanno nel file. Impostali con:
+#   wrangler secret put SIGNING_JWK     (incolla il JWK privato — vedi README)
+#   wrangler secret put ADMIN_SECRET    (una password a tua scelta)

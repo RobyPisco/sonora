@@ -2,7 +2,12 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.6.5** (allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.0.0** (primo rilascio commerciale; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+
+**Licenza/attivazione (dalla 1.0.0)**: prova 3 giorni, poi codice per cliente. Anti-condivisione un-codice-un-PC
+via Worker Cloudflare (`worker/`, live su `sonora-license.piscofactory.workers.dev`), che firma un token Ed25519
+verificato offline dall'app. Core in `app/licensing.py`, dialog `app/ui_license.py`, gate in `app/main.py`.
+Gestione codici via `POST /admin/*` (vedi `worker/README.md`). Segreti solo sul Worker, mai nel repo.
 
 ## Cosa fa (completo e funzionante)
 - **Download**: yt-dlp (libreria), formati mp3/m4a/opus/flac/wav, coda + playlist, anteprima (titolo/durata/cover),
@@ -106,7 +111,7 @@ Versione corrente: **1.6.5** (allineata in `app/__init__.py`, `installer/sonora.
 ## Comandi
 - Dev: `python run.py`
 - Build exe: `python -m PyInstaller build.spec --noconfirm` → `dist/Sonora/Sonora.exe`
-- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.6.3.exe`
+- Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\sonora.iss` → `dist_installer/SonoraSetup-1.0.0.exe`
 
 ## DA FARE (idee proposte, scelta utente)
 - **Firma installer**: senza firma Windows SmartScreen mostra "editore sconosciuto" (anche durante

@@ -485,6 +485,35 @@ class MainWindow(QWidget):
 
         threading.Thread(target=_work, daemon=True).start()
 
+    def _refresh_license_ui(self) -> None:
+        """Aggiorna il footer (banner prova + pulsante Attiva) secondo lo stato."""
+        text = f"Sonora v{__version__}  ·  © 2026 Pisco Factory"
+        show_activate = True
+        try:
+            from . import licensing
+            st = licensing.status()
+            if st.state == "trial":
+                giorni = "1 giorno" if st.days_left == 1 else f"{st.days_left} giorni"
+                text += f"  ·  Prova: {giorni}"
+            elif st.state == "expired":
+                text += "  ·  Prova scaduta"
+            else:  # licensed
+                text += "  ·  Attivo"
+                show_activate = False
+        except Exception:  # noqa: BLE001 (il footer non deve mai bloccare la UI)
+            pass
+        self._brand_label.setText(text)
+        self._activate_btn.setVisible(show_activate)
+
+    def _open_activation(self) -> None:
+        """Apre la finestra di attivazione codice (da pulsante Attiva)."""
+        from . import licensing
+        from .ui_license import run_activation_gate
+
+        expired = licensing.status().state == "expired"
+        if run_activation_gate(trial_expired=expired, parent=self):
+            self._refresh_license_ui()
+
     # ---------- costruzione UI ----------
 
     def _build_ui(self) -> None:
@@ -500,28 +529,27 @@ class MainWindow(QWidget):
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(16, 4, 16, 4)
         fl.setSpacing(10)
-        brand_text = f"Sonora v{__version__}  ·  © 2026 Pisco Factory"
-        try:
-            from . import licensing
-            st = licensing.status()
-            if st.state == "trial":
-                giorni = "1 giorno" if st.days_left == 1 else f"{st.days_left} giorni"
-                brand_text += f"  ·  Prova: {giorni}"
-        except Exception:  # noqa: BLE001 (il banner non deve mai bloccare la UI)
-            pass
-        brand = QLabel(brand_text)
-        brand.setStyleSheet("color:#6b7080; font-size:11px;")
+        self._brand_label = QLabel()
+        self._brand_label.setStyleSheet("color:#6b7080; font-size:11px;")
         disclaimer = QLabel("Usa solo contenuti di cui detieni i diritti.")
         disclaimer.setStyleSheet("color:#565b6b; font-size:11px; font-style:italic;")
+        # pulsante Attiva: apre la finestra del codice in qualsiasi momento
+        # (visibile durante la prova o se scaduta; nascosto se già attivata).
+        self._activate_btn = QPushButton("Attiva")
+        self._activate_btn.setObjectName("GhostMini")
+        self._activate_btn.setFixedWidth(60)
+        self._activate_btn.clicked.connect(self._open_activation)
         info_btn = QPushButton("Info")
         info_btn.setObjectName("GhostMini")
         info_btn.setFixedWidth(50)
         info_btn.clicked.connect(self._show_about)
-        fl.addWidget(brand)
+        fl.addWidget(self._brand_label)
         fl.addStretch(1)
         fl.addWidget(disclaimer)
+        fl.addWidget(self._activate_btn)
         fl.addWidget(info_btn)
         shell.addWidget(footer, 0)
+        self._refresh_license_ui()
 
         dl_tab = QWidget()
         dl_tab.setObjectName("Root")

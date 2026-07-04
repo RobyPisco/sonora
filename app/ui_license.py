@@ -78,7 +78,9 @@ class LicenseDialog(QDialog):
 
         # pulsanti azione
         btns = QHBoxLayout()
-        self.quit_btn = QPushButton("Esci")
+        # a prova scaduta il dialog è bloccante (annullare = uscire dall'app);
+        # se aperto durante la prova, annullare chiude solo la finestra.
+        self.quit_btn = QPushButton("Esci" if trial_expired else "Chiudi")
         self.quit_btn.setObjectName("Ghost")
         self.quit_btn.clicked.connect(self.reject)
         self.activate_btn = QPushButton("Attiva")
@@ -115,7 +117,7 @@ class LicenseDialog(QDialog):
             self._set_status(result.message, ok=False)
 
 
-def run_activation_gate(trial_expired: bool = True) -> bool:
+def run_activation_gate(trial_expired: bool = True, parent=None) -> bool:
     """Mostra il dialog modale. True se l'app è stata attivata, False se annulla."""
-    dlg = LicenseDialog(trial_expired=trial_expired)
+    dlg = LicenseDialog(parent, trial_expired=trial_expired)
     return dlg.exec() == QDialog.DialogCode.Accepted

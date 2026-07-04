@@ -41,7 +41,32 @@ cliente a **un solo PC** e firma un token Ed25519 che l'app Sonora poi verifica
    wrangler secret put ADMIN_SECRET   # una password a tua scelta
    ```
 
-## Uso quotidiano
+## Uso quotidiano (modo semplice: script PowerShell)
+
+Una volta sola, crea il file `worker/.admin-secret` con dentro la tua password admin
+(è gitignorato, resta solo sul tuo PC):
+```powershell
+Set-Content worker\.admin-secret 'LA_TUA_PASSWORD_ADMIN' -NoNewline
+```
+
+**Generare codici da vendere:**
+```powershell
+cd worker
+.\genera-codici.ps1                 # 1 codice
+.\genera-codici.ps1 5               # 5 codici
+.\genera-codici.ps1 3 "Mario Rossi" # 3 codici con nota
+```
+
+**Revocare / gestire un codice:**
+```powershell
+.\revoca-codice.ps1 ABCD-EFGH-JKLM-NPQR          # revoca (blocca entro ~7 giorni)
+.\revoca-codice.ps1 ABCD-EFGH-JKLM-NPQR -Reset   # sgancia dal PC (cliente cambia computer)
+.\revoca-codice.ps1 ABCD-EFGH-JKLM-NPQR -Info    # mostra lo stato
+```
+
+---
+
+## Uso quotidiano (alternativa: curl)
 
 **Generare codici da vendere** (ne crea N, li segna `unused`):
 ```

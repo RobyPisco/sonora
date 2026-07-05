@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.3.0** (export stem separati/WAV-MP3 + niente auto-analisi; 1.2.0: menu modalità stem riorganizzato; 1.1.0: Roformer SW 6 stem + pulsanti ±semitono nel Mixer; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.4.0** (basi «senza una traccia»; 1.3.0: export stem separati/WAV-MP3 + niente auto-analisi; 1.2.0: menu modalità stem riorganizzato; 1.1.0: Roformer SW 6 stem + pulsanti ±semitono nel Mixer; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 **Licenza/attivazione (dalla 1.0.0)**: prova 3 giorni, poi codice per cliente. Anti-condivisione un-codice-un-PC
 via Worker Cloudflare (`worker/`, live su `sonora-license.piscofactory.workers.dev`), che firma un token Ed25519
@@ -64,6 +64,10 @@ Gestione codici via `POST /admin/*` (vedi `worker/README.md`). Segreti solo sul 
       nome diventa `BASSO - titolo (+1st).wav`.
     - **Tutti gli stem**: un file per traccia, PURI (solo velocità/tono applicati, niente
       volume/pan/EQ), in sottocartella automatica `stems +1st [75%]/` con nomi `VOCE - titolo.ext`.
+    - **Basi «senza una traccia» (minus one)**: un mix COMPLETO per ogni stem escluso
+      (ignora mute/solo, conserva volumi/pan/EQ/velocità/tono; click/count-in opzionali),
+      in sottocartella `basi senza una traccia [+1st]/` con nomi `NO_VOCE - titolo.ext`.
+      Render pigro nel worker (un mix alla volta in RAM).
   - **Sessione mixer salvata per brano** (fader/pan/mute/solo/velocità/tono): ripristino automatico al ricarico.
   - **scorciatoie** (Spazio/L/Home/A/B/1-6).
 - **Scheda "Testi" (Lyrics Finder)**:

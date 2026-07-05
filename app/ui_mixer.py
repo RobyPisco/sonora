@@ -184,15 +184,19 @@ class ExportWorker(QObject):
 
     done = Signal(bool, str)   # ok, path-o-errore
 
-    def __init__(self, jobs: list[tuple[np.ndarray, str]], sr: int, fmt: str):
+    def __init__(self, jobs: list[tuple], sr: int, fmt: str):
         super().__init__()
-        self._jobs = jobs   # lista (buffer, path)
+        # lista (buffer | callable→buffer, path). I callable rendono il mix al
+        # momento della scrittura: N export "minus one" senza N buffer in RAM.
+        self._jobs = jobs
         self._sr = sr
         self._fmt = fmt
 
     def run(self) -> None:
         try:
             for mix, path in self._jobs:
+                if callable(mix):
+                    mix = mix()
                 _export_audio(mix, self._sr, path, self._fmt)
             self.done.emit(True, self._jobs[0][1] if self._jobs else "")
         except Exception as exc:  # noqa: BLE001
@@ -215,14 +219,18 @@ class ExportOptionsDialog(QDialog):
         what_lbl = QLabel("Cosa esportare")
         what_lbl.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700; letter-spacing:1px;")
         self.rb_mix = QRadioButton("Mix unico (come lo senti: volumi, mute/solo, EQ)")
+        self.rb_minus = QRadioButton("Basi «senza una traccia» — un mix completo per ogni\n"
+                                     "stem escluso (NO_VOCE, NO_BASSO, …)")
         self.rb_stems = QRadioButton("Tutti gli stem — un file per traccia, puri,\n"
                                      "con velocità e tono attuali applicati")
         self.rb_mix.setChecked(True)
         self._grp_what = QButtonGroup(self)
         self._grp_what.addButton(self.rb_mix)
+        self._grp_what.addButton(self.rb_minus)
         self._grp_what.addButton(self.rb_stems)
         lay.addWidget(what_lbl)
         lay.addWidget(self.rb_mix)
+        lay.addWidget(self.rb_minus)
         lay.addWidget(self.rb_stems)
 
         # formato
@@ -278,8 +286,11 @@ class ExportOptionsDialog(QDialog):
         lay.addWidget(bb)
 
     def options(self) -> tuple[str, str, bool, bool, int]:
-        """(what, fmt, click, countin, beats) — what: 'mix'|'stems', fmt: 'wav'|'mp3'."""
-        return ("stems" if self.rb_stems.isChecked() else "mix",
+        """(what, fmt, click, countin, beats) — what: 'mix'|'minus'|'stems',
+        fmt: 'wav'|'mp3'."""
+        what = ("stems" if self.rb_stems.isChecked()
+                else "minus" if self.rb_minus.isChecked() else "mix")
+        return (what,
                 "mp3" if self.rb_mp3.isChecked() else "wav",
                 self.chk_click.isChecked(),
                 self.chk_countin.isChecked(),
@@ -1786,6 +1797,9 @@ class MixerTab(QWidget):
         if what == "stems":
             self._export_all_stems(fmt)
             return
+        if what == "minus":
+            self._export_minus_one(fmt, include_click, want_countin, countin_beats)
+            return
 
         base = os.path.basename(self._folder.rstrip("/\\")) or "mix"
         tag = self._xform_tag()
@@ -1824,6 +1838,45 @@ class MixerTab(QWidget):
                 mix = np.concatenate([cin, mix], axis=0)
 
         self._start_export([(mix, path)], sr, fmt, kind="mix")
+
+    def _export_minus_one(self, fmt: str, include_click: bool,
+                          want_countin: bool, countin_beats: int) -> None:
+        """Esporta una base per ogni stem escluso: mix COMPLETO (ignora mute/solo,
+        conserva volumi/pan/EQ/velocità/tono) meno una traccia alla volta.
+        File: «NO_VOCE - titolo.ext» in una sottocartella automatica."""
+        base = os.path.basename(self._folder.rstrip("/\\")) or "mix"
+        tag = self._xform_tag()
+        sub = f"basi senza una traccia {tag}".rstrip()
+        out_dir = os.path.join(self._folder or "", sub)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "Esporta", f"Impossibile creare la cartella: {exc}")
+            return
+
+        cin = None
+        if want_countin:
+            cin, _ = self.engine.render_count_in(countin_beats)
+            if cin is None:
+                QMessageBox.warning(
+                    self, "Esporta", "Count-in non disponibile: ri-analizza il brano.")
+
+        def job_for(name: str):
+            # callable: il render avviene nel worker, un mix alla volta in RAM
+            def render() -> np.ndarray:
+                mix, _sr = self.engine.render_mix(include_click=include_click,
+                                                  exclude=name, full=True)
+                if cin is not None:
+                    return np.concatenate([cin, mix], axis=0)
+                return mix
+            return render
+
+        jobs = []
+        for t in self.engine.tracks:
+            tag_no = STEM_NO.get(t.name, f"NO_{t.name.upper()}")
+            path = os.path.join(out_dir, f"{tag_no} - {base}.{fmt}")
+            jobs.append((job_for(t.name), path))
+        self._start_export(jobs, self.engine.sr, fmt, kind="minus")
 
     def _export_all_stems(self, fmt: str) -> None:
         """Esporta ogni traccia come file separato (stem puri: solo velocità e
@@ -1864,6 +1917,9 @@ class MixerTab(QWidget):
         elif getattr(self, "_ex_kind", "mix") == "stems":
             QMessageBox.information(
                 self, "Esporta", f"Stem esportati in:\n{os.path.dirname(info)}")
+        elif self._ex_kind == "minus":
+            QMessageBox.information(
+                self, "Esporta", f"Basi esportate in:\n{os.path.dirname(info)}")
         else:
             QMessageBox.information(self, "Esporta", f"Mix esportato in:\n{info}")
 

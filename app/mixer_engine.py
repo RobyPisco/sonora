@@ -306,17 +306,22 @@ class MixerEngine:
 
     # ---------- render offline del mix (export) ----------
 
-    def render_mix(self, include_click: bool = False) -> tuple[np.ndarray | None, int]:
+    def render_mix(self, include_click: bool = False, exclude: str | None = None,
+                   full: bool = False) -> tuple[np.ndarray | None, int]:
         """Mixa gli stem audibili (mute/solo/gain/pan/master correnti) su un buffer
         stereo unico, riflettendo anche velocità/pitch attuali. Per l'export su file.
-        Se include_click è True sovrappone il metronomo ai beat."""
+        Se include_click è True sovrappone il metronomo ai beat.
+        exclude: nome di una traccia da lasciare fuori (export "minus one").
+        full: ignora mute/solo correnti (mix completo, salvo l'eventuale exclude)."""
         if not self.tracks:
             return None, self.sr
         n = self.n_frames
         mix = np.zeros((n, 2), dtype="float32")
         any_solo = any(t.solo for t in self.tracks)
         for t in self.tracks:
-            audible = (t.solo if any_solo else not t.mute)
+            if exclude is not None and t.name == exclude:
+                continue
+            audible = True if full else (t.solo if any_solo else not t.mute)
             if not audible:
                 continue
             d = t.data

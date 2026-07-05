@@ -83,3 +83,32 @@ def test_render_mix_all_muted_is_silent(tmp_path):
     mix, _ = eng.render_mix()
     assert float(np.max(np.abs(mix))) == 0.0
     eng.close()
+
+
+def test_render_mix_exclude_leaves_track_out(tmp_path):
+    a = np.ones((400, 2), dtype="float32") * 0.2
+    b = np.ones((400, 2), dtype="float32") * 0.2
+    pa, pb = tmp_path / "a.wav", tmp_path / "b.wav"
+    _write_wav(pa, a)
+    _write_wav(pb, b)
+    eng = MixerEngine()
+    eng.load_files([("a", str(pa)), ("b", str(pb))])
+    both, _ = eng.render_mix()
+    only_b, _ = eng.render_mix(exclude="a")
+    # senza "a" il mix deve essere più basso, ma non muto (c'è ancora "b")
+    assert 0.0 < float(np.max(np.abs(only_b))) < float(np.max(np.abs(both)))
+    eng.close()
+
+
+def test_render_mix_full_ignores_mute_and_solo(tmp_path):
+    a = np.ones((400, 2), dtype="float32") * 0.2
+    pa = tmp_path / "a.wav"
+    _write_wav(pa, a)
+    eng = MixerEngine()
+    eng.load_files([("a", str(pa))])
+    eng.set_mute(0, True)
+    silent, _ = eng.render_mix()               # mutata → silenzio
+    full, _ = eng.render_mix(full=True)        # full → la traccia c'è comunque
+    assert float(np.max(np.abs(silent))) == 0.0
+    assert float(np.max(np.abs(full))) > 0.0
+    eng.close()

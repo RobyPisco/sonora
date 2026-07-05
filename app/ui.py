@@ -54,14 +54,15 @@ from .downloader import (
 from .ui_mixer import MixerTab
 from .ui_lyrics import LyricsTab
 
+# Modalità raggruppate per risultato (quante tracce), poi per motore/qualità.
 STEM_MODES = [
-    ("Roformer SW — 6 stem (top strumenti)", "sw6"),
-    ("Roformer — 6 stem (top voce, lento)", "rof6"),
-    ("Roformer — voce/strumentale (top karaoke)", "rof"),
-    ("6 stem — qualità max", "6hq"),
-    ("6 stem", "6"),
-    ("4 stem", "4"),
-    ("2 stem (karaoke)", "2"),
+    ("6 stem · Roformer SW — consigliato", "sw6"),
+    ("6 stem · Roformer+Demucs — top voce, lento", "rof6"),
+    ("6 stem · Demucs ensemble", "6hq"),
+    ("6 stem · Demucs", "6"),
+    ("4 stem · Demucs", "4"),
+    ("Voce/strumentale · Roformer — top karaoke", "rof"),
+    ("Voce/strumentale · Demucs — veloce", "2"),
 ]
 STEM_FORMATS = ["wav", "flac", "mp3"]
 
@@ -783,7 +784,13 @@ class MainWindow(QWidget):
         self.stem_mode_combo = QComboBox()
         for label, _v in STEM_MODES:
             self.stem_mode_combo.addItem(label)
-        self.stem_mode_combo.setToolTip("Quante tracce separate produrre.")
+        self.stem_mode_combo.setToolTip(
+            "Quante tracce produrre e con quale motore.\n"
+            "• 6 stem: voce, batteria, basso, chitarra, piano, altro\n"
+            "• Roformer SW: la migliore qualità sugli strumenti, un solo passaggio\n"
+            "• Roformer+Demucs: voce leggermente migliore ma 3 passaggi (lento)\n"
+            "• Demucs: più veloce, qualità inferiore\n"
+            "• Voce/strumentale: due tracce, ideale per karaoke")
         self.stem_fmt_combo = QComboBox()
         self.stem_fmt_combo.addItems(STEM_FORMATS)
         self.stem_all_btn = QPushButton("Separa tutti")

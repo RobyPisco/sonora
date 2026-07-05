@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.1.0** (Roformer SW 6 stem + pulsanti ±semitono nel Mixer; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.2.0** (menu modalità stem riorganizzato; in 1.1.0: Roformer SW 6 stem + pulsanti ±semitono nel Mixer; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 **Licenza/attivazione (dalla 1.0.0)**: prova 3 giorni, poi codice per cliente. Anti-condivisione un-codice-un-PC
 via Worker Cloudflare (`worker/`, live su `sonora-license.piscofactory.workers.dev`), che firma un token Ed25519
@@ -35,6 +35,8 @@ Gestione codici via `POST /admin/*` (vedi `worker/README.md`). Segreti solo sul 
     **Roformer 6 stem** (rof6, cascade: top voce) e **Roformer voce/strumentale** (rof, top karaoke) — via audio-separator / BS-RoFormer
   - **6hq** (ensemble Demucs htdemucs_ft+htdemucs_6s), **6**, **4**, **2** (Demucs)
   - Output wav/flac/mp3. "Separa tutti" (salta i già separati).
+  - NB: l'opzione "voce asciutta" (de-reverb `deverb_bs_roformer` post-separazione) è stata
+    provata e SCARTATA: il modello taglia la voce in alcuni punti. Non riproporla.
   - **Auto-analisi a fine separazione**: calcolo immediato di BPM, key e beat grid.
   - **Gestione motore** (menu "Opzioni ▾" accanto a Installa motore):
     - **Verifica / Ripara motore**: diagnostica e ripara solo il necessario (se torch non

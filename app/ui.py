@@ -55,7 +55,8 @@ from .ui_mixer import MixerTab
 from .ui_lyrics import LyricsTab
 
 STEM_MODES = [
-    ("Roformer — 6 stem (top, lento)", "rof6"),
+    ("Roformer SW — 6 stem (top strumenti)", "sw6"),
+    ("Roformer — 6 stem (top voce, lento)", "rof6"),
     ("Roformer — voce/strumentale (top karaoke)", "rof"),
     ("6 stem — qualità max", "6hq"),
     ("6 stem", "6"),

@@ -215,6 +215,36 @@ def test_pick_voc_inst_fallback_by_keyword(tmp_path):
     assert inst is not None and "instrument" in inst.name.lower()
 
 
+def test_pick_stem_exact_name(tmp_path):
+    (tmp_path / "drums.wav").write_text("x")
+    f = stems._pick_stem(tmp_path, "drums", ".wav")
+    assert f is not None and f.name == "drums.wav"
+
+
+def test_pick_stem_fallback_by_keyword(tmp_path):
+    (tmp_path / "song (Drums).wav").write_text("x")
+    f = stems._pick_stem(tmp_path, "drums", ".wav")
+    assert f is not None and "drums" in f.name.lower()
+
+
+def test_pick_stem_vocals_ignores_no_vocals(tmp_path):
+    (tmp_path / "song no_vocals.wav").write_text("x")
+    assert stems._pick_stem(tmp_path, "vocals", ".wav") is None
+    (tmp_path / "song vocals.wav").write_text("x")
+    f = stems._pick_stem(tmp_path, "vocals", ".wav")
+    assert f is not None and f.name == "song vocals.wav"
+
+
+def test_pick_stem_missing_returns_none(tmp_path):
+    assert stems._pick_stem(tmp_path, "piano", ".wav") is None
+
+
+def test_sw6_mode_registered():
+    assert "sw6" in stems.ROFORMER_MODES
+    assert stems.STEMS_FOR_MODE["sw6"] == [
+        "vocals", "drums", "bass", "guitar", "piano", "other"]
+
+
 # ---------------- escalation riparazione motore ----------------
 
 def test_repair_engine_full_install_when_no_venv(monkeypatch):

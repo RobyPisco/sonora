@@ -24,6 +24,10 @@ MODEL_FOR_MODE = {"2": "htdemucs_ft", "4": "htdemucs_ft", "6": "htdemucs_6s"}
 # Modello Roformer (via audio-separator). BS-Roformer top per voce/strumentale.
 ROFORMER_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 
+# Roformer multi-stem: BS-Roformer-SW (jarredou) produce 6 stem in un passaggio
+# solo, con gli strumenti (batteria/basso/chitarra/piano) ben sopra Demucs.
+ROFORMER_SW_MODEL = "BS-Roformer-SW.ckpt"
+
 # Nomi stem prodotti, per modalita' (per messaggi/verifica).
 STEMS_FOR_MODE = {
     "2": ["vocals", "no_vocals"],
@@ -31,10 +35,11 @@ STEMS_FOR_MODE = {
     "6": ["vocals", "drums", "bass", "guitar", "piano", "other"],
     "rof": ["vocals", "no_vocals"],
     "rof6": ["vocals", "drums", "bass", "guitar", "piano", "other"],
+    "sw6": ["vocals", "drums", "bass", "guitar", "piano", "other"],
 }
 
 # Modalita' Roformer note (separazione via audio-separator + eventuale cascade).
-ROFORMER_MODES = ("rof", "rof6")
+ROFORMER_MODES = ("rof", "rof6", "sw6")
 
 LogCb = Callable[[str], None]
 ProgCb = Callable[[float], None]
@@ -643,9 +648,22 @@ def _pick_voc_inst(folder: Path, ext: str) -> tuple[Path | None, Path | None]:
     return (voc if voc.exists() else v), (inst if inst.exists() else i)
 
 
-def _run_roformer(src: Path, out_format: str,
+def _pick_stem(folder: Path, stem: str, ext: str) -> Path | None:
+    """Trova il file di uno stem nella cartella: nome esatto, altrimenti per
+    parola chiave nel nome (audio-separator può usare nomi tipo «song (Drums)»)."""
+    exact = folder / f"{stem}{ext}"
+    if exact.exists():
+        return exact
+    for f in folder.glob(f"*{ext}"):
+        low = f.name.lower()
+        if stem in low and f"no_{stem}" not in low:
+            return f
+    return None
+
+
+def _run_roformer(src: Path, model: str, out_format: str,
                   log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> Path:
-    """Separa src in voce + strumentale con Roformer. Ritorna la cartella di output."""
+    """Separa src col modello Roformer indicato. Ritorna la cartella di output."""
     script = _roformer_script_path()
     if not script:
         raise RuntimeError("script Roformer non trovato")
@@ -655,7 +673,7 @@ def _run_roformer(src: Path, out_format: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     models = separator_models_dir()
     models.mkdir(parents=True, exist_ok=True)
-    log_cb(f"Separo «{src.stem}» — Roformer ({ROFORMER_MODEL})…")
+    log_cb(f"Separo «{src.stem}» — Roformer ({model})…")
 
     tail: list[str] = []
 
@@ -671,7 +689,7 @@ def _run_roformer(src: Path, out_format: str,
             del tail[:-15]
 
     rc = _stream([str(venv_python()), script, str(src), str(out_dir),
-                  str(models), ROFORMER_MODEL, out_format], on_text, cancel)
+                  str(models), model, out_format], on_text, cancel)
     if rc == -1:
         raise RuntimeError("annullato")
     if rc != 0:
@@ -787,7 +805,8 @@ def separate(input_file: str, mode: str, out_format: str,
     """Separa input_file negli stem. Ritorna i path dei file prodotti.
 
     mode: "2" | "4" | "6" | "6hq" (ensemble Demucs qualità massima)
-          | "rof" (Roformer voce/strumentale) | "rof6" (Roformer + cascade Demucs).
+          | "rof" (Roformer voce/strumentale) | "rof6" (Roformer + cascade Demucs)
+          | "sw6" (Roformer SW multi-stem: 6 stem in un passaggio).
     Output in `<cartella_sorgente>/<nome> - stems/`.
     """
     src = Path(input_file)
@@ -829,16 +848,26 @@ def separate(input_file: str, mode: str, out_format: str,
                                        log_cb, progress_cb, cancel)
                 for stem in ENSEMBLE_PICK[model]:
                     take(produced / f"{stem}{ext}")
+        elif mode == "sw6":
+            # 6 stem in un passaggio solo col Roformer multi-stem (SW):
+            # strumenti molto più puliti di Demucs, nessuna cascade
+            log_cb("Roformer SW — 6 stem in un passaggio")
+            rof = _run_roformer(src, ROFORMER_SW_MODEL, out_format,
+                                log_cb, progress_cb, cancel)
+            for stem in STEMS_FOR_MODE["sw6"]:
+                take(_pick_stem(rof, stem, ext), f"{stem}{ext}")
         elif mode == "rof":
             # solo voce + strumentale via Roformer
-            rof = _run_roformer(src, out_format, log_cb, progress_cb, cancel)
+            rof = _run_roformer(src, ROFORMER_MODEL, out_format,
+                                log_cb, progress_cb, cancel)
             voc, inst = _pick_voc_inst(rof, ext)
             take(voc, f"vocals{ext}")
             take(inst, f"no_vocals{ext}")
         elif mode == "rof6":
             # voce da Roformer, strumenti da Demucs sullo strumentale (cascade)
             log_cb("Qualità massima — passo 1/3 (Roformer)")
-            rof = _run_roformer(src, out_format, log_cb, progress_cb, cancel)
+            rof = _run_roformer(src, ROFORMER_MODEL, out_format,
+                                log_cb, progress_cb, cancel)
             voc, inst = _pick_voc_inst(rof, ext)
             take(voc, f"vocals{ext}")
             if not inst or not inst.exists():

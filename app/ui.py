@@ -105,18 +105,8 @@ class StemWorker(QObject):
                                    self.log.emit, self.progress.emit,
                                    lambda: self._cancel)
             out_dir = os.path.dirname(files[0]) if files else ""
-            # auto-analisi: calcola BPM/tonalità/beat subito così, aprendo il
-            # mixer, l'analisi è già pronta (metronomo e beat grid inclusi).
-            # Errore o annullamento qui NON fanno fallire la separazione.
-            if out_dir and not self._cancel:
-                try:
-                    self.status.emit("analisi")
-                    self.log.emit("Analisi del brano (BPM, tonalità, beat)…")
-                    stems.analyze(out_dir, self.log.emit, lambda: self._cancel)
-                except Exception as exc:  # noqa: BLE001
-                    logging.getLogger("sonora.stems").warning("analisi saltata: %s", exc)
-                    msg = str(exc).splitlines()[0] if str(exc) else "errore"
-                    self.log.emit(f"analisi saltata: {msg}")
+            # niente auto-analisi qui: BPM/tonalità/beat si calcolano dal Mixer
+            # col pulsante «Analizza», quando serve all'utente.
             self.finished.emit(True, out_dir)
         except Exception as exc:  # noqa: BLE001
             logging.getLogger("sonora.stems").exception(

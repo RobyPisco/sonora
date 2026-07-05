@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QPoint, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPen, QPolygon, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QScrollBar,
     QSizePolicy,
     QSlider,
@@ -60,6 +62,10 @@ STEM_LABEL = {"vocals": "Vocals", "drums": "Drums", "bass": "Bass",
 # Prefisso file per gli stem mutati durante l'export (es. NO_BASSO - …)
 STEM_NO = {"vocals": "NO_VOCE", "drums": "NO_BATTERIA", "bass": "NO_BASSO",
            "guitar": "NO_CHITARRA", "piano": "NO_PIANO", "other": "NO_ALTRO"}
+# Nome italiano per l'export dei singoli stem (es. BASSO - titolo.wav)
+STEM_IT = {"vocals": "VOCE", "drums": "BATTERIA", "bass": "BASSO",
+           "guitar": "CHITARRA", "piano": "PIANO", "other": "ALTRO",
+           "no_vocals": "BASE"}
 
 # Larghezza fissa del pannello controlli di ogni traccia. Condivisa fra
 # TrackStrip e TimelineWidget così le waveform partono alla stessa x e
@@ -194,7 +200,7 @@ class ExportWorker(QObject):
 
 
 class ExportOptionsDialog(QDialog):
-    """Chiede formato e opzioni metronomo prima dell'export."""
+    """Chiede cosa esportare (mix o stem separati), formato e opzioni metronomo."""
 
     def __init__(self, parent, click_available: bool):
         super().__init__(parent)
@@ -204,6 +210,38 @@ class ExportOptionsDialog(QDialog):
         lay.setContentsMargins(18, 16, 18, 16)
         lay.setSpacing(10)
 
+        # cosa esportare (QButtonGroup separati: senza, tutti i radio del
+        # dialogo diventerebbero mutuamente esclusivi tra loro)
+        what_lbl = QLabel("Cosa esportare")
+        what_lbl.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700; letter-spacing:1px;")
+        self.rb_mix = QRadioButton("Mix unico (come lo senti: volumi, mute/solo, EQ)")
+        self.rb_stems = QRadioButton("Tutti gli stem — un file per traccia, puri,\n"
+                                     "con velocità e tono attuali applicati")
+        self.rb_mix.setChecked(True)
+        self._grp_what = QButtonGroup(self)
+        self._grp_what.addButton(self.rb_mix)
+        self._grp_what.addButton(self.rb_stems)
+        lay.addWidget(what_lbl)
+        lay.addWidget(self.rb_mix)
+        lay.addWidget(self.rb_stems)
+
+        # formato
+        fmt_lbl = QLabel("Formato")
+        fmt_lbl.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700; letter-spacing:1px;")
+        self.rb_wav = QRadioButton("WAV (qualità piena)")
+        self.rb_mp3 = QRadioButton("MP3 320 kbps (file più piccoli)")
+        self.rb_wav.setChecked(True)
+        self._grp_fmt = QButtonGroup(self)
+        self._grp_fmt.addButton(self.rb_wav)
+        self._grp_fmt.addButton(self.rb_mp3)
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(self.rb_wav)
+        fmt_row.addWidget(self.rb_mp3)
+        fmt_row.addStretch(1)
+        lay.addWidget(fmt_lbl)
+        lay.addLayout(fmt_row)
+
+        # opzioni metronomo (valgono solo per il mix unico)
         self.chk_click = QCheckBox("Includi il click (metronomo) per tutto il brano")
         self.chk_countin = QCheckBox("Aggiungi un count-in iniziale (nello stesso file)")
         beats_row = QHBoxLayout()
@@ -224,6 +262,10 @@ class ExportOptionsDialog(QDialog):
             self.spin_beats.setEnabled(False)
             self.chk_countin.toggled.connect(self.lbl_beats.setEnabled)
             self.chk_countin.toggled.connect(self.spin_beats.setEnabled)
+            # click/count-in non hanno senso sugli stem separati
+            for w in (self.chk_click, self.chk_countin):
+                self.rb_stems.toggled.connect(
+                    lambda on, _w=w: (_w.setEnabled(not on), on and _w.setChecked(False)))
         else:
             info = QLabel("Ri-analizza il brano per abilitare le opzioni del click.")
             info.setStyleSheet("color:#8b90a0;")
@@ -235,8 +277,11 @@ class ExportOptionsDialog(QDialog):
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
 
-    def options(self) -> tuple[bool, bool, int]:
-        return (self.chk_click.isChecked(),
+    def options(self) -> tuple[str, str, bool, bool, int]:
+        """(what, fmt, click, countin, beats) — what: 'mix'|'stems', fmt: 'wav'|'mp3'."""
+        return ("stems" if self.rb_stems.isChecked() else "mix",
+                "mp3" if self.rb_mp3.isChecked() else "wav",
+                self.chk_click.isChecked(),
                 self.chk_countin.isChecked(),
                 self.spin_beats.value())
 
@@ -776,7 +821,8 @@ class MixerTab(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         self.export_btn.setEnabled(False)
         self.export_btn.setToolTip(
-            "Salva il mix corrente (mute/solo/volume/pan/velocità) in un file audio.")
+            "Esporta il mix corrente (mute/solo/volume/pan/velocità) in un file,\n"
+            "oppure tutti gli stem come file separati con velocità/tono applicati.")
         self.tuner_btn = QPushButton("🎼 Accordatore")
         self.tuner_btn.setObjectName("Ghost")
         self.tuner_btn.setToolTip("Accordatore: tono di riferimento A440 / corde + accordatore dal microfono.")
@@ -1712,25 +1758,56 @@ class MixerTab(QWidget):
         tags = [STEM_NO.get(n, f"NO_{n.upper()}") for n in names]
         return (" ".join(tags) + " - ") if tags else ""
 
+    def _xform_tag(self) -> str:
+        """Etichetta della trasformazione corrente per i nomi file: '+1st', '75%',
+        '+1st 75%' — vuota se velocità e tono sono quelli originali."""
+        parts = []
+        semis = int(self.pitch_slider.value())
+        if semis:
+            parts.append(f"{semis:+d}st")
+        pct = self.speed_slider.value()
+        if pct != 100:
+            parts.append(f"{pct}%")
+        return " ".join(parts)
+
+    def _audible_tracks(self) -> list:
+        """Tracce udibili col mute/solo corrente (stessa regola di render_mix)."""
+        any_solo = any(t.solo for t in self.engine.tracks)
+        return [t for t in self.engine.tracks
+                if (t.solo if any_solo else not t.mute)]
+
     def _on_export(self) -> None:
         if not self.engine.tracks or (self._ex_thread and self._ex_thread.isRunning()):
             return
         dlg = ExportOptionsDialog(self, click_available=self.click_btn.isEnabled())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        include_click, want_countin, countin_beats = dlg.options()
+        what, fmt, include_click, want_countin, countin_beats = dlg.options()
+        if what == "stems":
+            self._export_all_stems(fmt)
+            return
 
         base = os.path.basename(self._folder.rstrip("/\\")) or "mix"
-        prefix = self._muted_prefix()
-        default = os.path.join(self._folder or "", f"{prefix}{base} - mix.wav")
-        path, sel = QFileDialog.getSaveFileName(
-            self, "Esporta mix", default, "WAV (*.wav);;MP3 (*.mp3)")
+        tag = self._xform_tag()
+        tag_sfx = f" ({tag})" if tag else ""
+        audible = self._audible_tracks()
+        if len(audible) == 1:
+            # un solo stem udibile (solo/mute): nome parlante «BASSO - titolo»
+            label = STEM_IT.get(audible[0].name, audible[0].name.upper())
+            fname = f"{label} - {base}{tag_sfx}.{fmt}"
+        else:
+            fname = f"{self._muted_prefix()}{base} - mix{tag_sfx}.{fmt}"
+        default = os.path.join(self._folder or "", fname)
+        filters = ("WAV (*.wav);;MP3 (*.mp3)" if fmt == "wav"
+                   else "MP3 (*.mp3);;WAV (*.wav)")
+        path, sel = QFileDialog.getSaveFileName(self, "Esporta mix", default, filters)
         if not path:
             return
         ext = os.path.splitext(path)[1].lower()
-        fmt = "mp3" if (ext == ".mp3" or "mp3" in sel.lower() and ext != ".wav") else "wav"
-        if not os.path.splitext(path)[1]:
-            path += ".mp3" if fmt == "mp3" else ".wav"
+        if ext in (".wav", ".mp3"):
+            fmt = ext[1:]          # l'estensione scelta a mano vince sul dialogo
+        else:
+            path += f".{fmt}"
 
         mix, sr = self.engine.render_mix(include_click=include_click)
         if mix is None:
@@ -1746,10 +1823,33 @@ class MixerTab(QWidget):
                 # anteponi i click al mix → unico file: click, click… e parte il brano
                 mix = np.concatenate([cin, mix], axis=0)
 
+        self._start_export([(mix, path)], sr, fmt, kind="mix")
+
+    def _export_all_stems(self, fmt: str) -> None:
+        """Esporta ogni traccia come file separato (stem puri: solo velocità e
+        tono applicati, niente volume/pan/EQ) in una sottocartella automatica."""
+        base = os.path.basename(self._folder.rstrip("/\\")) or "stems"
+        tag = self._xform_tag()
+        sub = f"stems {tag}" if tag else "stems export"
+        out_dir = os.path.join(self._folder or "", sub)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "Esporta", f"Impossibile creare la cartella: {exc}")
+            return
+        jobs = []
+        for t in self.engine.tracks:
+            label = STEM_IT.get(t.name, t.name.upper())
+            path = os.path.join(out_dir, f"{label} - {base}.{fmt}")
+            jobs.append((t.data_base, path))   # puro: post pitch/stretch, pre-EQ
+        self._start_export(jobs, self.engine.sr, fmt, kind="stems")
+
+    def _start_export(self, jobs: list, sr: int, fmt: str, kind: str) -> None:
+        self._ex_kind = kind
         self.export_btn.setEnabled(False)
         self.export_btn.setText("Esporto…")
         self._ex_thread = QThread()
-        self._ex_worker = ExportWorker([(mix, path)], sr, fmt)
+        self._ex_worker = ExportWorker(jobs, sr, fmt)
         self._ex_worker.moveToThread(self._ex_thread)
         self._ex_thread.started.connect(self._ex_worker.run)
         self._ex_worker.done.connect(self._on_export_done)
@@ -1759,10 +1859,13 @@ class MixerTab(QWidget):
     def _on_export_done(self, ok: bool, info: str) -> None:
         self.export_btn.setEnabled(True)
         self.export_btn.setText("Esporta…")
-        if ok:
-            QMessageBox.information(self, "Esporta", f"Mix esportato in:\n{info}")
-        else:
+        if not ok:
             QMessageBox.warning(self, "Esporta", f"Esportazione fallita: {info}")
+        elif getattr(self, "_ex_kind", "mix") == "stems":
+            QMessageBox.information(
+                self, "Esporta", f"Stem esportati in:\n{os.path.dirname(info)}")
+        else:
+            QMessageBox.information(self, "Esporta", f"Mix esportato in:\n{info}")
 
     # ---------- sessione mixer (mix.json nella cartella stem) ----------
 

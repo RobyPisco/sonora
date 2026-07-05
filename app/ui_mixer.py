@@ -936,6 +936,15 @@ class MixerTab(QWidget):
         self.pitch_slider.sliderReleased.connect(self._apply_transform)
         self.pitch_lbl = QLabel("0 st")
         self.pitch_lbl.setStyleSheet("color:#e6e8ee; font-size:12px; font-weight:600;")
+        # step rapido ±1 semitono
+        self.pitch_down_btn = QPushButton("–")
+        self.pitch_up_btn = QPushButton("+")
+        for b in (self.pitch_down_btn, self.pitch_up_btn):
+            b.setObjectName("GhostMini"); b.setFixedWidth(26)
+        self.pitch_down_btn.setToolTip("Un semitono in giù")
+        self.pitch_up_btn.setToolTip("Un semitono in su")
+        self.pitch_down_btn.clicked.connect(lambda: self._step_pitch(-1))
+        self.pitch_up_btn.clicked.connect(lambda: self._step_pitch(+1))
         # loop
         self.a_btn = QPushButton("A"); self.b_btn = QPushButton("B")
         self.loop_btn = QPushButton("Loop"); self.loop_btn.setCheckable(True)
@@ -1018,6 +1027,7 @@ class MixerTab(QWidget):
                    self.loopclr_btn, self.autospeed_btn, self.zoomout_btn,
                    self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
                    self.click_btn, self.steady_btn,
+                   self.pitch_down_btn, self.pitch_up_btn,
                    *(pb for _p, pb in self.speed_presets)):
             _b.setFixedHeight(28)
         # cursori della barra: altezza fissa così la maniglia non viene tagliata
@@ -1039,7 +1049,8 @@ class MixerTab(QWidget):
         bar.addWidget(_hgroup(self.play_btn, self.stop_btn, self.time_lbl, spacing=10))
         bar.addWidget(_hgroup(_cap("VELOCITÀ ·"), self.speed_lbl, self.speed_slider,
                               preset_host))
-        bar.addWidget(_hgroup(_cap("TONO ·"), self.pitch_lbl, self.pitch_slider))
+        bar.addWidget(_hgroup(_cap("TONO ·"), self.pitch_lbl, self.pitch_down_btn,
+                              self.pitch_slider, self.pitch_up_btn))
         bar.addWidget(_hgroup(_cap("LOOP"), self.a_btn, self.b_btn, self.loop_btn,
                               self.loopclr_btn, self.autospeed_btn))
         bar.addWidget(_hgroup(_cap("ZOOM"), self.zoomout_btn, self.zoomin_btn,
@@ -1487,9 +1498,16 @@ class MixerTab(QWidget):
         self.speed_slider.setValue(pct)   # aggiorna label + evidenza via _on_speed_changed
         self._apply_transform()
 
+    def _step_pitch(self, delta: int) -> None:
+        """Sposta la trasposizione di un semitono e applica subito."""
+        self.pitch_slider.setValue(self.pitch_slider.value() + delta)  # clampa al range
+        self._apply_transform()
+
     def _set_xform_busy(self, busy: bool) -> None:
         self.speed_slider.setEnabled(not busy)
         self.pitch_slider.setEnabled(not busy)
+        self.pitch_down_btn.setEnabled(not busy)
+        self.pitch_up_btn.setEnabled(not busy)
         for _v, b in self.speed_presets:
             b.setEnabled(not busy)
         if busy:

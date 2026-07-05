@@ -2,7 +2,7 @@
 
 App desktop Windows: **YouTube audio downloader + separazione stem + mixer/studio di pratica + accordatore + visualizzatore testi**.
 Path progetto: `C:\xampp\htdocs\sonora`. Python **3.14** + PySide6. Tutto salvato su disco e allineato su GitHub.
-Versione corrente: **1.0.0** (primo rilascio commerciale; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
+Versione corrente: **1.1.0** (Roformer SW 6 stem + pulsanti ±semitono nel Mixer; allineata in `app/__init__.py`, `installer/sonora.iss` e GitHub).
 
 **Licenza/attivazione (dalla 1.0.0)**: prova 3 giorni, poi codice per cliente. Anti-condivisione un-codice-un-PC
 via Worker Cloudflare (`worker/`, live su `sonora-license.piscofactory.workers.dev`), che firma un token Ed25519
@@ -31,7 +31,8 @@ Gestione codici via `POST /admin/*` (vedi `worker/README.md`). Segreti solo sul 
   combaciare con `__version__` in `app/__init__.py`. Avvio manuale (`workflow_dispatch`) = build di prova
   senza pubblicare, con l'installer caricato come artifact.
 - **Separazione stem**: click destro / "Separa file…" / drag. Modalità:
-  - **Roformer 6 stem** (rof6) e **Roformer voce/strumentale** (rof, top karaoke) — via audio-separator / BS-RoFormer
+  - **Roformer SW 6 stem** (sw6, BS-Roformer-SW: 6 stem in un passaggio, top per gli strumenti),
+    **Roformer 6 stem** (rof6, cascade: top voce) e **Roformer voce/strumentale** (rof, top karaoke) — via audio-separator / BS-RoFormer
   - **6hq** (ensemble Demucs htdemucs_ft+htdemucs_6s), **6**, **4**, **2** (Demucs)
   - Output wav/flac/mp3. "Separa tutti" (salta i già separati).
   - **Auto-analisi a fine separazione**: calcolo immediato di BPM, key e beat grid.

@@ -1,0 +1,75 @@
+"""Novità per versione, mostrate all'utente («Cosa c'è di nuovo»).
+
+Aggiorna QUESTO file a ogni release: voci in italiano, dal punto di vista
+dell'utente (niente dettagli tecnici). Ordine: dalla più recente.
+Il dialogo appare al primo avvio dopo un aggiornamento (vedi ui.py) e resta
+consultabile dal pulsante «Novità» nel footer.
+"""
+
+from __future__ import annotations
+
+import re
+
+# (versione, [novità]) — la più recente in cima.
+CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.5.0", [
+        "Nuova finestra «Novità» (questa!): dopo ogni aggiornamento ti "
+        "racconta cosa è cambiato. La ritrovi quando vuoi nel pulsante "
+        "«Novità» in basso.",
+    ]),
+    ("1.4.0", [
+        "Nuovo export «Basi senza una traccia»: un mix completo per ogni "
+        "strumento escluso (NO_VOCE, NO_BASSO, …) — perfetto per farci "
+        "pratica sopra, anche con click e count-in.",
+    ]),
+    ("1.3.0", [
+        "Export rinnovato: puoi esportare tutti gli stem come file separati, "
+        "con velocità e tono attuali applicati, in una cartella dedicata.",
+        "Scelta WAV o MP3 direttamente nel dialogo di esportazione.",
+        "Nomi file più chiari: esportando un solo stem il file si chiama "
+        "«BASSO - titolo», con la trasposizione nel nome (es. +1st).",
+        "L'analisi BPM/tonalità non parte più da sola dopo la separazione: "
+        "la lanci tu dal Mixer col pulsante «Analizza».",
+    ]),
+    ("1.2.0", [
+        "Menu delle modalità di separazione riorganizzato: si capisce subito "
+        "quante tracce ottieni e con quale motore.",
+    ]),
+    ("1.1.0", [
+        "Nuova modalità di separazione «Roformer SW»: batteria, basso, "
+        "chitarra e piano molto più puliti, in un solo passaggio.",
+        "Pulsanti − / + accanto al cursore del tono nel Mixer per cambiare "
+        "di un semitono al volo.",
+    ]),
+    ("1.0.1", [
+        "Pulsante «Attiva» sempre a portata di mano nel footer, per inserire "
+        "il codice anche durante la prova.",
+    ]),
+    ("1.0.0", [
+        "Primo rilascio: download da YouTube, separazione stem, Mixer per la "
+        "pratica, accordatore e testi. Prova gratuita di 3 giorni.",
+    ]),
+]
+
+
+def _parse(v: str) -> tuple[int, ...]:
+    nums = re.findall(r"\d+", v or "")
+    return tuple(int(n) for n in nums) or (0,)
+
+
+def entries_since(last_seen: str) -> list[tuple[str, list[str]]]:
+    """Le voci più nuove di last_seen (tutte se last_seen è vuota/ignota)."""
+    if not last_seen:
+        return list(CHANGELOG)
+    ref = _parse(last_seen)
+    return [(v, notes) for v, notes in CHANGELOG if _parse(v) > ref]
+
+
+def as_html(entries: list[tuple[str, list[str]]]) -> str:
+    """Rende le voci in HTML per il dialogo «Novità»."""
+    parts: list[str] = []
+    for ver, notes in entries:
+        parts.append(f"<h3 style='margin:10px 0 4px'>Versione {ver}</h3>")
+        items = "".join(f"<li style='margin:2px 0'>{n}</li>" for n in notes)
+        parts.append(f"<ul style='margin:0 0 6px 18px'>{items}</ul>")
+    return "".join(parts)

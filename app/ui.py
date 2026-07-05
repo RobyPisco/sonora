@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, app_update, config, history, paths, stems, updater
+from . import __version__, app_update, changelog, config, history, paths, stems, updater
 from .downloader import (
     AUDIO_FORMATS,
     DownloadOptions,
@@ -463,6 +463,52 @@ class MainWindow(QWidget):
         # rinnovo silenzioso del token di licenza (revoca/scadenza), in background
         QTimer.singleShot(3500, self._refresh_license)
 
+        # «Novità»: al primo avvio dopo un aggiornamento mostra cosa è cambiato
+        QTimer.singleShot(800, self._maybe_show_whats_new)
+
+    def _maybe_show_whats_new(self) -> None:
+        """Mostra le novità se questa versione non è ancora stata «vista».
+
+        Alla prima installazione (nessuna versione registrata) non mostra
+        nulla: registra e basta, le novità hanno senso solo dopo un update.
+        """
+        last = str(self.cfg.get("last_seen_version", "") or "")
+        if last == __version__:
+            return
+        try:
+            if last:
+                entries = changelog.entries_since(last)
+                if entries:
+                    self._show_changelog(entries, fresh_update=True)
+        finally:
+            self.cfg["last_seen_version"] = __version__
+            config.save(self.cfg)
+
+    def _show_changelog(self, entries: list, fresh_update: bool = False) -> None:
+        """Dialogo «Novità»: elenco versioni e migliorie, scorrevole."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Novità di Sonora")
+        dlg.resize(520, 420)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(18, 16, 18, 12)
+        title = QLabel("🎉 Sonora si è aggiornata! Ecco le novità:"
+                       if fresh_update else "Novità delle versioni di Sonora")
+        title.setStyleSheet("font-size:15px; font-weight:700;")
+        lay.addWidget(title)
+        body = QLabel(changelog.as_html(entries))
+        body.setWordWrap(True)
+        body.setTextFormat(Qt.TextFormat.RichText)
+        body.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        bb.accepted.connect(dlg.accept)
+        lay.addWidget(bb)
+        dlg.exec()
+
     def _refresh_license(self) -> None:
         # su thread separato: refresh_if_needed può fare rete (timeout) e non
         # deve bloccare la UI. Non tocca oggetti Qt, quindi è sicuro.
@@ -535,10 +581,16 @@ class MainWindow(QWidget):
         info_btn.setObjectName("GhostMini")
         info_btn.setFixedWidth(50)
         info_btn.clicked.connect(self._show_about)
+        news_btn = QPushButton("Novità")
+        news_btn.setObjectName("GhostMini")
+        news_btn.setFixedWidth(60)
+        news_btn.setToolTip("Cosa è cambiato nelle varie versioni di Sonora.")
+        news_btn.clicked.connect(lambda: self._show_changelog(changelog.CHANGELOG))
         fl.addWidget(self._brand_label)
         fl.addStretch(1)
         fl.addWidget(disclaimer)
         fl.addWidget(self._activate_btn)
+        fl.addWidget(news_btn)
         fl.addWidget(info_btn)
         shell.addWidget(footer, 0)
         self._refresh_license_ui()

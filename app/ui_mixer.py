@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QObject, QPoint, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPen, QPolygon, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollBar,
@@ -34,8 +33,9 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from . import config, history, paths, stems
+from . import config, history, icons, paths, stems, theme
 from .flowlayout import FlowLayout
+from .toast import toast
 from .mixer_engine import MixerEngine
 from .waveform import WaveformWidget, compute_peaks
 
@@ -51,11 +51,8 @@ def chord_label(root: int, quality: str, notation: str) -> str:
         return "—"
     return names[root] + ("m" if quality == "min" else "")
 
-# Colori per stem (stile riferimento)
-STEM_COLORS = {
-    "vocals": "#ff4d8d", "drums": "#ff9f43", "bass": "#ffd23f",
-    "guitar": "#3ddc84", "piano": "#a974ff", "other": "#4aa8ff",
-}
+# Colori per stem: definiti in theme.py (unica fonte di verità)
+STEM_COLORS = theme.STEM_COLORS
 STEM_ORDER = ["vocals", "drums", "bass", "guitar", "piano", "other"]
 STEM_LABEL = {"vocals": "Vocals", "drums": "Drums", "bass": "Bass",
               "guitar": "Guitar", "piano": "Piano", "other": "Other"}
@@ -70,13 +67,14 @@ STEM_IT = {"vocals": "VOCE", "drums": "BATTERIA", "bass": "BASSO",
 # Larghezza fissa del pannello controlli di ogni traccia. Condivisa fra
 # TrackStrip e TimelineWidget così le waveform partono alla stessa x e
 # restano allineate ai tick della timeline. Cambiala in un solo punto.
-CTRL_W = 280
+CTRL_W = 250
 
 
 def _fader_qss(color: str) -> str:
     """Stylesheet per un fader volume con la parte riempita del colore dello stem."""
+    groove = theme.COLORS["raise"]
     return (
-        "QSlider::groove:horizontal{height:6px;background:#1a1d26;border-radius:3px;}"
+        f"QSlider::groove:horizontal{{height:6px;background:{groove};border-radius:3px;}}"
         f"QSlider::sub-page:horizontal{{background:{color};border-radius:3px;}}"
         "QSlider::handle:horizontal{background:#ffffff;width:14px;height:14px;"
         "margin:-4px 0;border-radius:7px;border:1px solid #cdd1de;}"
@@ -216,8 +214,8 @@ class ExportOptionsDialog(QDialog):
 
         # cosa esportare (QButtonGroup separati: senza, tutti i radio del
         # dialogo diventerebbero mutuamente esclusivi tra loro)
-        what_lbl = QLabel("Cosa esportare")
-        what_lbl.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700; letter-spacing:1px;")
+        what_lbl = QLabel("COSA ESPORTARE")
+        what_lbl.setProperty("class", "Eyebrow")
         self.rb_mix = QRadioButton("Mix unico (come lo senti: volumi, mute/solo, EQ)")
         self.rb_minus = QRadioButton("Basi «senza una traccia» — un mix completo per ogni\n"
                                      "stem escluso (NO_VOCE, NO_BASSO, …)")
@@ -234,8 +232,8 @@ class ExportOptionsDialog(QDialog):
         lay.addWidget(self.rb_stems)
 
         # formato
-        fmt_lbl = QLabel("Formato")
-        fmt_lbl.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700; letter-spacing:1px;")
+        fmt_lbl = QLabel("FORMATO")
+        fmt_lbl.setProperty("class", "Eyebrow")
         self.rb_wav = QRadioButton("WAV (qualità piena)")
         self.rb_mp3 = QRadioButton("MP3 320 kbps (file più piccoli)")
         self.rb_wav.setChecked(True)
@@ -276,7 +274,7 @@ class ExportOptionsDialog(QDialog):
                     lambda on, _w=w: (_w.setEnabled(not on), on and _w.setChecked(False)))
         else:
             info = QLabel("Ri-analizza il brano per abilitare le opzioni del click.")
-            info.setStyleSheet("color:#8b90a0;")
+            info.setProperty("class", "Muted")
             lay.addWidget(info)
 
         bb = QDialogButtonBox(
@@ -309,18 +307,19 @@ def _hgroup(*widgets, spacing: int = 6) -> QWidget:
     return w
 
 
-def _card(title: str, value: str, color: str = "#e6e8ee") -> tuple[QFrame, QLabel]:
+def _card(title: str, value: str, color: str = "") -> tuple[QFrame, QLabel]:
     """Card di analisi compatta (etichetta minuscola in alto, valore sotto)."""
+    color = color or theme.COLORS["text"]
     f = QFrame()
     f.setObjectName("StatCard")
     lay = QVBoxLayout(f)
     lay.setContentsMargins(12, 7, 12, 7)
     lay.setSpacing(1)
     t = QLabel(title)
-    t.setStyleSheet("color:#8b90a0; font-size:9px; font-weight:700;"
+    t.setStyleSheet(f"color:{theme.COLORS['faint']}; font-size:9px; font-weight:700;"
                     " letter-spacing:1px;")
     v = QLabel(value)
-    v.setStyleSheet(f"color:{color}; font-size:17px; font-weight:800;")
+    v.setStyleSheet(f"color:{color}; font-size:16px; font-weight:800;")
     lay.addWidget(t)
     lay.addWidget(v)
     return f, v
@@ -394,16 +393,16 @@ class TimelineWidget(QWidget):
         mid = h / 2.0
 
         # Background: pannello sinistro come le strisce, area destra come le waveform
-        p.fillRect(0, 0, CTRL_W, h, QColor("#12141b"))
-        p.fillRect(CTRL_W, 0, w - CTRL_W, h, QColor("#10121a"))
+        p.fillRect(0, 0, CTRL_W, h, QColor(theme.COLORS["panel"]))
+        p.fillRect(CTRL_W, 0, w - CTRL_W, h, QColor(theme.COLORS["wave_bg"]))
 
         # Bordo inferiore e separatore sinistro
-        p.setPen(QPen(QColor("#1e2230"), 1))
+        p.setPen(QPen(QColor(theme.COLORS["strip_sep"]), 1))
         p.drawLine(0, h - 1, w, h - 1)
         p.drawLine(CTRL_W, 0, CTRL_W, h)
 
         # Label nel pannello sinistro (allineata ai nomi traccia)
-        p.setPen(QPen(QColor("#8b90a0"), 1))
+        p.setPen(QPen(QColor(theme.COLORS["muted"]), 1))
         p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         p.drawText(16, int(mid + 5), "TIMELINE")
 
@@ -443,7 +442,7 @@ class TimelineWidget(QWidget):
                         if i % decimation == 0:
                             if is_bar_start:
                                 bar_num = (i // bpb) + 1
-                                p.setPen(QPen(QColor("#e6e8ee"), 1))
+                                p.setPen(QPen(QColor(theme.COLORS["text"]), 1))
                                 p.drawLine(bx, h - 8, bx, h - 1)
                                 p.drawText(bx - 15, h - 10, 30, 10, Qt.AlignmentFlag.AlignCenter, f"{bar_num}")
                             else:
@@ -481,7 +480,7 @@ class TimelineWidget(QWidget):
                 fr = t / self._duration
                 if vs <= fr <= ve:
                     bx = self._x_of(fr)
-                    p.setPen(QPen(QColor("#8b90a0"), 1))
+                    p.setPen(QPen(QColor(theme.COLORS["muted"]), 1))
                     p.drawLine(bx, h - 6, bx, h - 1)
                     
                     lbl = f"{int(t)}s" if t < 60 else f"{int(t)//60}:{int(t)%60:02d}"
@@ -496,7 +495,7 @@ class TimelineWidget(QWidget):
             
             # Triangolino arancione
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#ff9f43"))
+            p.setBrush(QColor(theme.COLORS["warn"]))
             points = [
                 QPoint(px - 5, 0),
                 QPoint(px + 5, 0),
@@ -528,17 +527,19 @@ class TrackStrip(QWidget):
         ctrl.setObjectName("StripPanel")
         ctrl.setFixedWidth(CTRL_W)
         cl = QVBoxLayout(ctrl)
-        cl.setContentsMargins(16, 12, 16, 12)
-        cl.setSpacing(8)
+        cl.setContentsMargins(14, 6, 14, 6)
+        cl.setSpacing(4)
 
         # riga 1: nome traccia (colorato) + valore dB a destra
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(6)
         name_lbl = QLabel(STEM_LABEL.get(name, name.title()))
-        name_lbl.setStyleSheet(f"color:{color}; font-weight:700; font-size:15px;")
+        name_lbl.setStyleSheet(f"color:{color}; font-weight:700; font-size:14px;")
         self.db_lbl = QLabel("0.0 dB")
-        self.db_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+        self.db_lbl.setStyleSheet(
+            f"color:{theme.COLORS['muted']}; font-size:11px;"
+            " font-family:'Cascadia Code','Consolas',monospace;")
         head.addWidget(name_lbl)
         head.addStretch(1)
         head.addWidget(self.db_lbl)
@@ -570,14 +571,19 @@ class TrackStrip(QWidget):
         self.s_btn = QPushButton("S")
         for b in (self.m_btn, self.s_btn):
             b.setCheckable(True)
-            b.setFixedWidth(30)
+            b.setFixedSize(30, 22)
             b.setObjectName("GhostMini")
+        self.m_btn.setProperty("accent", "danger")
+        self.m_btn.setToolTip("Muta la traccia (tasto 1-6)")
+        self.s_btn.setProperty("accent", "solo")
+        self.s_btn.setToolTip("Solo (Shift+1-6)")
         self.m_btn.toggled.connect(self._on_mute)
         self.s_btn.toggled.connect(self._on_solo)
         # EQ a 3 bande: pulsante che apre un popup con Bassi/Medi/Alti
         self.eq_btn = QPushButton("EQ")
-        self.eq_btn.setFixedWidth(34)
+        self.eq_btn.setFixedSize(34, 22)
         self.eq_btn.setObjectName("GhostMini")
+        self.eq_btn.setProperty("accent", "ok")
         self.eq_btn.setToolTip("Equalizzatore 3 bande (Bassi / Medi / Alti)")
         self.eq_btn.clicked.connect(self._show_eq)
         self._eq = {"low": 0, "mid": 0, "high": 0}   # dB correnti
@@ -594,7 +600,7 @@ class TrackStrip(QWidget):
         row.addWidget(ctrl, 0)
 
         self.wave = WaveformWidget(color)
-        self.wave.setMinimumHeight(96)
+        self.wave.setMinimumHeight(64)
         row.addWidget(self.wave, 1)
 
     def _notify(self) -> None:
@@ -614,12 +620,10 @@ class TrackStrip(QWidget):
 
     def _on_mute(self, b: bool) -> None:
         self.engine.set_mute(self.index, b)
-        self.m_btn.setStyleSheet("background:#ff3b5c;color:#fff;" if b else "")
         self._notify()
 
     def _on_solo(self, b: bool) -> None:
         self.engine.set_solo(self.index, b)
-        self.s_btn.setStyleSheet("background:#ffd23f;color:#14161c;" if b else "")
         self._notify()
 
     # ---------- EQ a 3 bande ----------
@@ -628,8 +632,7 @@ class TrackStrip(QWidget):
         return any(abs(v) > 0 for v in self._eq.values())
 
     def _refresh_eq_btn(self) -> None:
-        self.eq_btn.setStyleSheet(
-            "background:#3ddc84;color:#14161c;" if self._eq_active() else "")
+        theme.set_state(self.eq_btn, "on", self._eq_active())
 
     def _show_eq(self) -> None:
         """Popup con 3 cursori verticali per Bassi/Medi/Alti (-12..+12 dB)."""
@@ -643,7 +646,7 @@ class TrackStrip(QWidget):
             col = QVBoxLayout(); col.setSpacing(4)
             val_lbl = QLabel(self._fmt_eq(self._eq[key]))
             val_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            val_lbl.setStyleSheet("color:#e6e8ee; font-size:11px;")
+            val_lbl.setStyleSheet(f"color:{theme.COLORS['text']}; font-size:11px;")
             sl = QSlider(Qt.Orientation.Vertical)
             sl.setRange(-12, 12); sl.setValue(int(self._eq[key]))
             sl.setFixedHeight(110)
@@ -651,7 +654,7 @@ class TrackStrip(QWidget):
             sl.sliderReleased.connect(self._apply_eq)
             name_lbl = QLabel(label)
             name_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            name_lbl.setStyleSheet("color:#8b90a0; font-size:11px;")
+            name_lbl.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:11px;")
             col.addWidget(val_lbl)
             col.addWidget(sl, 1, Qt.AlignmentFlag.AlignHCenter)
             col.addWidget(name_lbl)
@@ -727,14 +730,14 @@ class TrackStrip(QWidget):
         self.m_btn.blockSignals(True)
         self.m_btn.setChecked(mute)
         self.m_btn.blockSignals(False)
-        self.m_btn.setStyleSheet("background:#ff3b5c;color:#fff;" if mute else "")
+        theme.repolish(self.m_btn)
         self.engine.set_mute(self.index, mute)
 
         solo = bool(st.get("solo", False))
         self.s_btn.blockSignals(True)
         self.s_btn.setChecked(solo)
         self.s_btn.blockSignals(False)
-        self.s_btn.setStyleSheet("background:#ffd23f;color:#14161c;" if solo else "")
+        theme.repolish(self.s_btn)
         self.engine.set_solo(self.index, solo)
 
         eq = st.get("eq")
@@ -819,8 +822,9 @@ class MixerTab(QWidget):
 
         # --- bottoni azione (Accordatore / Esporta / Analizza / Recenti):
         #     montati da MainWindow come corner widget della barra schede ---
-        self.recent_btn = QPushButton("Recenti ▾")
+        self.recent_btn = QPushButton("Recenti")
         self.recent_btn.setObjectName("Ghost")
+        self.recent_btn.setIcon(icons.icon("clock", theme.COLORS["muted"], 15))
         self.recent_btn.setToolTip("Apri / riapri una cartella di stem.")
         self.recent_btn.clicked.connect(self._show_recent_menu)
         self.analyze_btn = QPushButton("Analizza")
@@ -829,13 +833,15 @@ class MixerTab(QWidget):
         self.analyze_btn.setEnabled(False)
         self.export_btn = QPushButton("Esporta…")
         self.export_btn.setObjectName("Ghost")
+        self.export_btn.setIcon(icons.icon("export", theme.COLORS["muted"], 15))
         self.export_btn.clicked.connect(self._on_export)
         self.export_btn.setEnabled(False)
         self.export_btn.setToolTip(
             "Esporta il mix corrente (mute/solo/volume/pan/velocità) in un file,\n"
             "oppure tutti gli stem come file separati con velocità/tono applicati.")
-        self.tuner_btn = QPushButton("🎼 Accordatore")
+        self.tuner_btn = QPushButton("Accordatore")
         self.tuner_btn.setObjectName("Ghost")
+        self.tuner_btn.setIcon(icons.icon("tuner", theme.COLORS["muted"], 15))
         self.tuner_btn.setToolTip("Accordatore: tono di riferimento A440 / corde + accordatore dal microfono.")
         self.tuner_btn.clicked.connect(self._open_tuner)
         self.actions_host = QWidget()
@@ -845,35 +851,33 @@ class MixerTab(QWidget):
         for b in (self.tuner_btn, self.export_btn, self.analyze_btn, self.recent_btn):
             ah.addWidget(b)
 
-        # --- header: titolo brano (sx) + card di analisi compatte (dx) ---
+        # --- header: titolo brano (sx) + azioni (dx); card di analisi sotto ---
         top = QHBoxLayout()
         top.setSpacing(12)
         self.title_lbl = QLabel("Nessuno stem caricato")
         self.title_lbl.setTextFormat(Qt.TextFormat.RichText)
-        self.title_lbl.setStyleSheet("font-size:16px; font-weight:700; color:#8b90a0;")
+        self.title_lbl.setStyleSheet(
+            f"font-size:20px; font-weight:700; color:{theme.COLORS['muted']};")
         self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        # minimo a 0: senza, il QLabel pretende la larghezza dell'intero titolo
-        # e comprime le card mandandole a capo. Così cede spazio e le card
-        # restano su una sola riga (il titolo viene troncato se serve).
         self.title_lbl.setMinimumWidth(0)
+        top.addWidget(self.title_lbl, 1)
+        top.addWidget(self.actions_host, 0)
+        body.addLayout(top)
 
         cards_host = QWidget()
-        cards_host.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.cards_row = FlowLayout(cards_host, hspacing=6, vspacing=6)
-        self.card_key = _card("TONALITÀ", "—", "#ff9f43")
+        self.card_key = _card("TONALITÀ", "—", theme.COLORS["warn"])
         self.card_bpm = _card("BPM", "—")
         self.card_scale = _card("SCALA", "—")
         self.card_dur = _card("DURATA", "—")
         self.card_lufs = _card("LUFS", "—")
         self.card_dr = _card("DYN RANGE", "—")
-        self.card_ts = _card("TEMPO STAB", "—", "#3ddc84")
+        self.card_ts = _card("TEMPO STAB", "—", theme.COLORS["ok"])
         for c, _v in (self.card_key, self.card_bpm, self.card_scale, self.card_dur,
                       self.card_lufs, self.card_dr, self.card_ts):
             c.setMinimumWidth(74)
             self.cards_row.addWidget(c)
-        top.addWidget(self.title_lbl, 1)
-        top.addWidget(cards_host, 0)
-        body.addLayout(top)
+        body.addWidget(cards_host)
 
         # --- presenza per stem: pallino colorato + nome + % (reflow) ---
         presence_host = QWidget()
@@ -887,8 +891,8 @@ class MixerTab(QWidget):
             dot = QLabel("●")
             dot.setStyleSheet(f"color:{STEM_COLORS[name]}; font-size:11px;")
             t = QLabel(STEM_LABEL[name].upper())
-            t.setStyleSheet("color:#cfd3df; font-size:11px; font-weight:700;"
-                            " letter-spacing:1px;")
+            t.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:11px;"
+                            " font-weight:700; letter-spacing:1px;")
             v = QLabel("—")
             v.setStyleSheet(f"color:{STEM_COLORS[name]}; font-size:12px; font-weight:800;")
             cb.addWidget(dot)
@@ -909,23 +913,23 @@ class MixerTab(QWidget):
         meta = QHBoxLayout()
         meta.setSpacing(10)
         sec_title = QLabel("SEZIONI")
-        sec_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
-                                " letter-spacing:1px;")
+        sec_title.setProperty("class", "Eyebrow")
         self.sections_box = QHBoxLayout(); self.sections_box.setSpacing(4)
         self._sections_hint = QLabel("— analizza per rilevarle —")
-        self._sections_hint.setStyleSheet("color:#6b7080; font-size:11px; font-style:italic;")
+        self._sections_hint.setStyleSheet(
+            f"color:{theme.COLORS['faint']}; font-size:11px; font-style:italic;")
         self.sections_box.addWidget(self._sections_hint)
         self.sections_box.addStretch(1)
         sec_inner = QWidget(); sec_inner.setLayout(self.sections_box)
 
         ch_title = QLabel("ACCORDO")
-        ch_title.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
-                               " letter-spacing:1px;")
+        ch_title.setProperty("class", "Eyebrow")
         self.chord_now = QLabel("—")
-        self.chord_now.setStyleSheet("color:#ff9f43; font-size:22px; font-weight:800;")
+        self.chord_now.setStyleSheet(
+            f"color:{theme.COLORS['warn']}; font-size:22px; font-weight:800;")
         self.chord_now.setMinimumWidth(46)
         self.chord_next = QLabel("")
-        self.chord_next.setStyleSheet("color:#8b90a0; font-size:14px;")
+        self.chord_next.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:14px;")
         self.notation_btn = QPushButton("Do Re Mi" if self._notation == "latin" else "C D E")
         self.notation_btn.setObjectName("GhostMini")
         self.notation_btn.setFixedWidth(84)
@@ -961,22 +965,27 @@ class MixerTab(QWidget):
 
         root.addLayout(body, 1)
 
-        # ===== barra di trasporto inferiore (un'unica barra, reflow su stretto) =====
+        # ===== barra di trasporto: gruppi etichettati che vanno a capo =====
+        mut = theme.COLORS["muted"]
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(40, 120)
         self.speed_slider.setValue(100)
-        self.speed_slider.setFixedWidth(140)
+        self.speed_slider.setMinimumWidth(120)
+        self.speed_slider.setMaximumWidth(160)
         self.speed_slider.setToolTip(
             "Velocità a tono invariato (40–120%).\nUsa i preset per scendere di colpo allo studio lento.")
         self.speed_slider.valueChanged.connect(self._on_speed_changed)
         self.speed_slider.sliderReleased.connect(self._apply_transform)
         self.speed_lbl = QLabel("x1.00")
-        self.speed_lbl.setStyleSheet("color:#e6e8ee; font-size:12px; font-weight:600;")
+        self.speed_lbl.setStyleSheet(
+            f"color:{theme.COLORS['text']}; font-size:12px; font-weight:600;")
         self.speed_presets: list[tuple[int, QPushButton]] = []
         preset_box = QHBoxLayout(); preset_box.setSpacing(3)
+        preset_box.setContentsMargins(0, 0, 0, 0)
         for pct in (50, 75, 90, 100):
             b = QPushButton(f"{pct}")
-            b.setObjectName("GhostMini"); b.setFixedWidth(34); b.setCheckable(True)
+            b.setObjectName("GhostMini"); b.setMinimumWidth(34); b.setCheckable(True)
+            b.setProperty("accent", "ok")
             b.setToolTip(f"Imposta la velocità al {pct}% (tono invariato)")
             b.clicked.connect(lambda _=False, p=pct: self._set_speed_preset(p))
             self.speed_presets.append((pct, b))
@@ -986,18 +995,22 @@ class MixerTab(QWidget):
         self.pitch_slider = QSlider(Qt.Orientation.Horizontal)
         self.pitch_slider.setRange(-6, 6)
         self.pitch_slider.setValue(0)
-        self.pitch_slider.setFixedWidth(100)
+        self.pitch_slider.setMinimumWidth(90)
+        self.pitch_slider.setMaximumWidth(120)
         self.pitch_slider.setToolTip("Trasposizione in semitoni (tempo invariato)")
         self.pitch_slider.valueChanged.connect(
             lambda v: self.pitch_lbl.setText(self._fmt_semis(v)))
         self.pitch_slider.sliderReleased.connect(self._apply_transform)
         self.pitch_lbl = QLabel("0 st")
-        self.pitch_lbl.setStyleSheet("color:#e6e8ee; font-size:12px; font-weight:600;")
+        self.pitch_lbl.setStyleSheet(
+            f"color:{theme.COLORS['text']}; font-size:12px; font-weight:600;")
         # step rapido ±1 semitono
-        self.pitch_down_btn = QPushButton("–")
-        self.pitch_up_btn = QPushButton("+")
+        self.pitch_down_btn = QPushButton()
+        self.pitch_down_btn.setIcon(icons.icon("minus", mut, 12))
+        self.pitch_up_btn = QPushButton()
+        self.pitch_up_btn.setIcon(icons.icon("plus", mut, 12))
         for b in (self.pitch_down_btn, self.pitch_up_btn):
-            b.setObjectName("GhostMini"); b.setFixedWidth(26)
+            b.setObjectName("GhostMini"); b.setMinimumWidth(28)
         self.pitch_down_btn.setToolTip("Un semitono in giù")
         self.pitch_up_btn.setToolTip("Un semitono in su")
         self.pitch_down_btn.clicked.connect(lambda: self._step_pitch(-1))
@@ -1005,31 +1018,41 @@ class MixerTab(QWidget):
         # loop
         self.a_btn = QPushButton("A"); self.b_btn = QPushButton("B")
         self.loop_btn = QPushButton("Loop"); self.loop_btn.setCheckable(True)
-        self.loopclr_btn = QPushButton("×")
-        for b in (self.a_btn, self.b_btn, self.loop_btn, self.loopclr_btn):
-            b.setObjectName("GhostMini"); b.setFixedWidth(42)
-        self.loop_btn.setFixedWidth(58)  # "Loop" ha bisogno di più spazio
+        self.loop_btn.setProperty("accent", "ok")
+        self.loop_btn.setIcon(icons.icon("repeat", mut, 13, on_color=theme.COLORS["bg"]))
+        self.loopclr_btn = QPushButton()
+        self.loopclr_btn.setIcon(icons.icon("x", mut, 12))
+        for b in (self.a_btn, self.b_btn, self.loopclr_btn):
+            b.setObjectName("GhostMini"); b.setMinimumWidth(32)
+        self.loop_btn.setObjectName("GhostMini"); self.loop_btn.setMinimumWidth(64)
         self.a_btn.setToolTip("Imposta l'inizio del loop al punto attuale (tasto A)\n"
                               "Suggerimento: Ctrl/Shift+trascina sulla waveform per selezionare il loop")
         self.b_btn.setToolTip("Imposta la fine del loop al punto attuale (tasto B)")
         self.loop_btn.setToolTip("Attiva/disattiva la ripetizione della regione A-B (tasto L)")
+        self.loopclr_btn.setToolTip("Cancella il loop A-B")
         self.a_btn.clicked.connect(lambda: self._set_ab("a"))
         self.b_btn.clicked.connect(lambda: self._set_ab("b"))
         self.loop_btn.toggled.connect(self._on_loop_toggle)
         self.loopclr_btn.clicked.connect(self._on_loop_clear)
         # loop progressivo: accelera ad ogni N giri fino al 100%
-        self.autospeed_btn = QPushButton("Auto↑")
-        self.autospeed_btn.setObjectName("GhostMini"); self.autospeed_btn.setFixedWidth(52)
+        self.autospeed_btn = QPushButton("Auto")
+        self.autospeed_btn.setObjectName("GhostMini")
+        self.autospeed_btn.setMinimumWidth(56)
+        self.autospeed_btn.setProperty("accent", "warn")
+        self.autospeed_btn.setIcon(icons.icon("gauge", mut, 13))
         self.autospeed_btn.setToolTip(
             "Loop progressivo: parte lento e accelera ad ogni giro fino a 100%.\n"
             "Clicca per configurare e attivare.")
         self.autospeed_btn.clicked.connect(self._show_autospeed)
         # zoom waveform (vista condivisa fra le tracce)
-        self.zoomout_btn = QPushButton("–")
-        self.zoomin_btn = QPushButton("+")
-        self.zoomfit_btn = QPushButton("⤢")
+        self.zoomout_btn = QPushButton()
+        self.zoomout_btn.setIcon(icons.icon("zoom-out", mut, 13))
+        self.zoomin_btn = QPushButton()
+        self.zoomin_btn.setIcon(icons.icon("zoom-in", mut, 13))
+        self.zoomfit_btn = QPushButton()
+        self.zoomfit_btn.setIcon(icons.icon("maximize", mut, 13))
         for b in (self.zoomout_btn, self.zoomin_btn, self.zoomfit_btn):
-            b.setObjectName("GhostMini"); b.setFixedWidth(30)
+            b.setObjectName("GhostMini"); b.setMinimumWidth(32)
         self.zoomout_btn.setToolTip("Zoom indietro (anche Ctrl+rotella sulla traccia)")
         self.zoomin_btn.setToolTip("Zoom avanti (anche Ctrl+rotella sulla traccia)")
         self.zoomfit_btn.setToolTip("Adatta: mostra tutto il brano")
@@ -1038,90 +1061,121 @@ class MixerTab(QWidget):
         self.zoomfit_btn.clicked.connect(self._zoom_reset)
         # toggle griglia beat sulle waveform (default acceso)
         self.beatgrid_btn = QPushButton("Griglia"); self.beatgrid_btn.setCheckable(True)
-        self.beatgrid_btn.setObjectName("GhostMini"); self.beatgrid_btn.setFixedWidth(60)
+        self.beatgrid_btn.setObjectName("GhostMini"); self.beatgrid_btn.setMinimumWidth(64)
+        self.beatgrid_btn.setProperty("accent", "ok")
+        self.beatgrid_btn.setIcon(icons.icon("grid", mut, 13, on_color=theme.COLORS["bg"]))
         self.beatgrid_btn.setChecked(True)
-        self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;")
         self.beatgrid_btn.setToolTip("Mostra/nascondi la griglia dei beat sulle waveform.")
         self.beatgrid_btn.toggled.connect(self._on_beatgrid_toggle)
         # metronomo
         self.click_btn = QPushButton("Click"); self.click_btn.setCheckable(True)
-        self.click_btn.setObjectName("GhostMini"); self.click_btn.setFixedWidth(56)
+        self.click_btn.setObjectName("GhostMini"); self.click_btn.setMinimumWidth(60)
+        self.click_btn.setProperty("accent", "danger")
+        self.click_btn.setIcon(icons.icon("metronome", mut, 13, on_color="#ffffff"))
         self.click_btn.toggled.connect(self._on_click_toggle)
         # toggle griglia regolare (steady) vs beat rilevati
         self.steady_btn = QPushButton("Steady"); self.steady_btn.setCheckable(True)
-        self.steady_btn.setObjectName("GhostMini"); self.steady_btn.setFixedWidth(58)
+        self.steady_btn.setObjectName("GhostMini"); self.steady_btn.setMinimumWidth(58)
+        self.steady_btn.setProperty("accent", "ok")
         self.steady_btn.setChecked(True)
-        self.steady_btn.setStyleSheet("background:#3ddc84;color:#14161c;")
         self.steady_btn.setToolTip(
             "ON: click a tempo costante (steady).\nOFF: segue i beat rilevati dal brano.")
         self.steady_btn.toggled.connect(self._on_steady_toggle)
         self.click_vol = QSlider(Qt.Orientation.Horizontal)
         self.click_vol.setRange(0, 100); self.click_vol.setValue(60)
-        self.click_vol.setFixedWidth(70)
+        self.click_vol.setMinimumWidth(60)
+        self.click_vol.setMaximumWidth(80)
+        self.click_vol.setToolTip("Volume del click")
         self.click_vol.valueChanged.connect(lambda v: self.engine.set_click(self.click_btn.isChecked(), v / 100))
 
-        # transport play/stop/tempo
-        self.play_btn = QPushButton("▶")
+        # transport play/stop/tempo: play tondo con icona play/pausa
+        self.play_btn = QPushButton()
         self.play_btn.setObjectName("PlayButton")
-        self.play_btn.setFixedSize(40, 40)
-        self.play_btn.clicked.connect(self._on_play)
-        self.stop_btn = QPushButton("■")
+        self.play_btn.setFixedSize(46, 46)
+        self.play_btn.setIconSize(QSize(19, 19))
+        self.play_btn.setCheckable(True)   # checked = in riproduzione (icona pausa)
+        self.play_btn.setIcon(icons.icon("play", "#ffffff", 19, on_name="pause"))
+        self.play_btn.setToolTip("Riproduci / pausa (Spazio)")
+        self.play_btn.clicked.connect(self._on_play_clicked)
+        self.stop_btn = QPushButton()
         self.stop_btn.setObjectName("GhostMini")
-        self.stop_btn.setFixedWidth(36)
+        self.stop_btn.setFixedSize(32, 32)
+        self.stop_btn.setIcon(icons.icon("stop", mut, 13))
+        self.stop_btn.setToolTip("Stop (torna all'inizio)")
         self.stop_btn.clicked.connect(self._on_stop)
         self.time_lbl = QLabel("0:00 / 0:00")
-        self.time_lbl.setStyleSheet("color:#cfd3df; font-family:Consolas,monospace;"
-                                    " font-size:13px;")
+        self.time_lbl.setStyleSheet(
+            f"color:{theme.COLORS['text']}; font-size:13px;"
+            " font-family:'Cascadia Code','Consolas',monospace;")
         # master
         self.master = QSlider(Qt.Orientation.Horizontal)
         self.master.setRange(-40, 6)
         self.master.setValue(0)
-        self.master.setFixedWidth(110)
+        self.master.setMinimumWidth(100)
+        self.master.setMaximumWidth(130)
         self.master.valueChanged.connect(lambda v: self.engine.set_master(float(v)))
 
-        # altezza uniforme per tutti i pulsantini della barra → allineati ai cursori
-        for _b in (self.stop_btn, self.a_btn, self.b_btn, self.loop_btn,
+        # altezza uniforme per i pulsantini → allineati ai cursori
+        for _b in (self.a_btn, self.b_btn, self.loop_btn,
                    self.loopclr_btn, self.autospeed_btn, self.zoomout_btn,
                    self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
                    self.click_btn, self.steady_btn,
                    self.pitch_down_btn, self.pitch_up_btn,
                    *(pb for _p, pb in self.speed_presets)):
-            _b.setFixedHeight(28)
-        # cursori della barra: altezza fissa così la maniglia non viene tagliata
+            _b.setFixedHeight(30)
         for _s in (self.speed_slider, self.pitch_slider, self.click_vol, self.master):
             _s.setFixedHeight(22)
 
-        def _cap(text: str) -> QLabel:
-            lb = QLabel(text)
-            lb.setStyleSheet("color:#8b90a0; font-size:10px; font-weight:700;"
-                             " letter-spacing:1px;")
-            return lb
+        def _tgroup(caption: str, *widgets) -> QFrame:
+            """Gruppo etichettato del trasporto (frame + eyebrow + riga controlli)."""
+            f = QFrame()
+            f.setObjectName("TransportGroup")
+            v = QVBoxLayout(f)
+            v.setContentsMargins(12, 6, 12, 8)
+            v.setSpacing(3)
+            cap = QLabel(caption)
+            cap.setProperty("class", "Eyebrow")
+            v.addWidget(cap)
+            rw = QHBoxLayout()
+            rw.setSpacing(6)
+            for w in widgets:
+                rw.addWidget(w, 0, Qt.AlignmentFlag.AlignVCenter)
+            v.addLayout(rw)
+            return f
 
-        # riga unica (niente reflow: evita il taglio verticale dei controlli);
-        # MASTER spinto a destra dallo stretch. Scorre oltre il bordo solo su
-        # finestre molto strette, ma non si accavalla mai.
+        # ancore fisse (play/stop/tempo a sinistra, master a destra); i gruppi
+        # centrali stanno in un FlowLayout: su finestre strette vanno a capo
+        # invece di uscire dallo schermo.
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
-        bar.setSpacing(16)
-        bar.addWidget(_hgroup(self.play_btn, self.stop_btn, self.time_lbl, spacing=10))
-        bar.addWidget(_hgroup(_cap("VELOCITÀ ·"), self.speed_lbl, self.speed_slider,
-                              preset_host))
-        bar.addWidget(_hgroup(_cap("TONO ·"), self.pitch_lbl, self.pitch_down_btn,
-                              self.pitch_slider, self.pitch_up_btn))
-        bar.addWidget(_hgroup(_cap("LOOP"), self.a_btn, self.b_btn, self.loop_btn,
-                              self.loopclr_btn, self.autospeed_btn))
-        bar.addWidget(_hgroup(_cap("ZOOM"), self.zoomout_btn, self.zoomin_btn,
-                              self.zoomfit_btn, self.beatgrid_btn))
-        bar.addWidget(_hgroup(_cap("CLICK"), self.click_btn, self.steady_btn,
-                              self.click_vol))
-        bar.addStretch(1)
-        bar.addWidget(_hgroup(_cap("MASTER"), self.master))
+        bar.setSpacing(12)
+        bar.addWidget(_hgroup(self.play_btn, self.stop_btn, self.time_lbl, spacing=10),
+                      0, Qt.AlignmentFlag.AlignVCenter)
+        groups_host = QWidget()
+        groups_host.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                  QSizePolicy.Policy.Preferred)
+        groups = FlowLayout(groups_host, hspacing=8, vspacing=6)
+        groups.addWidget(_tgroup("VELOCITÀ", self.speed_lbl, self.speed_slider,
+                                 preset_host))
+        groups.addWidget(_tgroup("TONO", self.pitch_lbl, self.pitch_down_btn,
+                                 self.pitch_slider, self.pitch_up_btn))
+        groups.addWidget(_tgroup("LOOP", self.a_btn, self.b_btn, self.loop_btn,
+                                 self.loopclr_btn, self.autospeed_btn))
+        groups.addWidget(_tgroup("ZOOM", self.zoomout_btn, self.zoomin_btn,
+                                 self.zoomfit_btn, self.beatgrid_btn))
+        groups.addWidget(_tgroup("CLICK", self.click_btn, self.steady_btn,
+                                 self.click_vol))
+        groups.addWidget(_tgroup("MASTER", self.master))
+        bar.addWidget(groups_host, 1)
 
         transport = QFrame()
         transport.setObjectName("TransportBar")
-        transport.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # verticale Preferred (non Fixed): quando i gruppi vanno a capo nel
+        # FlowLayout la barra cresce invece di tagliarli (heightForWidth)
+        transport.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                QSizePolicy.Policy.Preferred)
         tb = QHBoxLayout(transport)
-        tb.setContentsMargins(18, 9, 18, 9)
+        tb.setContentsMargins(16, 8, 16, 8)
         tb.addLayout(bar)
         root.addWidget(transport, 0)
 
@@ -1169,7 +1223,7 @@ class MixerTab(QWidget):
         exts = (".wav", ".flac", ".mp3")
         all_files = [f for f in os.listdir(folder) if f.lower().endswith(exts)] if os.path.isdir(folder) else []
         if not all_files:
-            QMessageBox.warning(self, "Vuota", "Nessun file audio nella cartella.")
+            toast(self, "Nessun file audio nella cartella scelta.", "warn")
             return
         # ordina secondo STEM_ORDER, gli altri in coda
         def keyf(fn: str) -> int:
@@ -1314,7 +1368,6 @@ class MixerTab(QWidget):
         self._apply_view()
 
     def _on_beatgrid_toggle(self, on: bool) -> None:
-        self.beatgrid_btn.setStyleSheet("background:#3ddc84;color:#14161c;" if on else "")
         fr = self._beat_fracs if on else []
         for s in getattr(self, "strips", []):
             s.wave.set_beats(fr)
@@ -1383,8 +1436,8 @@ class MixerTab(QWidget):
         if not self._folder or (self._an_thread and self._an_thread.isRunning()):
             return
         if not stems.engine_ready():
-            QMessageBox.information(self, "Motore mancante",
-                                    "Serve il motore stem (installalo dalla scheda Scarica).")
+            toast(self, "Serve il motore stem: installalo da Impostazioni → Motore stem.",
+                  "warn")
             return
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setText("Analizzo…")
@@ -1402,7 +1455,7 @@ class MixerTab(QWidget):
         if ok:
             self._apply_analysis(data)
         else:
-            QMessageBox.warning(self, "Analisi", f"Analisi fallita: {data.get('error', '')}")
+            toast(self, f"Analisi fallita: {data.get('error', '')}", "error")
 
     # ---------- accordi ----------
 
@@ -1451,7 +1504,8 @@ class MixerTab(QWidget):
                 w.deleteLater()
         if not self._sections:
             hint = QLabel("— analizza per rilevarle —")
-            hint.setStyleSheet("color:#6b7080; font-size:11px; font-style:italic;")
+            hint.setStyleSheet(
+                f"color:{theme.COLORS['faint']}; font-size:11px; font-style:italic;")
             self.sections_box.addWidget(hint)
             self.sections_box.addStretch(1)
             return
@@ -1496,23 +1550,41 @@ class MixerTab(QWidget):
         # ferma la riproduzione del mixer per non interferire con il microfono
         if self.engine.is_playing():
             self.engine.pause()
-            self.play_btn.setText("▶")
+            self._sync_play_btn()
         dlg = TunerDialog(self)
         dlg.exec()
 
     # ---------- trasporto ----------
 
+    def _sync_play_btn(self) -> None:
+        playing = self.engine.is_playing()
+        if self.play_btn.isChecked() != playing:
+            self.play_btn.blockSignals(True)
+            self.play_btn.setChecked(playing)
+            self.play_btn.blockSignals(False)
+
+    def _on_play_clicked(self) -> None:
+        # il click ha già invertito lo stato checked: riallineato in _on_play
+        self._on_play()
+
     def _on_play(self) -> None:
         if self.engine.is_playing():
             self.engine.pause()
-            self.play_btn.setText("▶")
         else:
             self.engine.play()
-            self.play_btn.setText("❚❚")
+        self._sync_play_btn()
+
+    def toggle_play(self) -> None:
+        """Alias pubblico usato dalla playbar globale."""
+        self._on_play()
+
+    def stop_playback(self) -> None:
+        """Alias pubblico usato dalla playbar globale."""
+        self._on_stop()
 
     def _on_stop(self) -> None:
         self.engine.stop()
-        self.play_btn.setText("▶")
+        self._sync_play_btn()
 
     def _on_wave_seek(self, frac: float) -> None:
         self.engine.seek(frac * self.engine.duration())
@@ -1547,7 +1619,7 @@ class MixerTab(QWidget):
             btn.blockSignals(True)
             btn.setChecked(on)
             btn.blockSignals(False)
-            btn.setStyleSheet("background:#3ddc84;color:#14161c;" if on else "")
+            theme.repolish(btn)
 
     def _set_speed_preset(self, pct: int) -> None:
         """Imposta la velocità a un valore preimpostato e applica subito."""
@@ -1569,10 +1641,12 @@ class MixerTab(QWidget):
             b.setEnabled(not busy)
         if busy:
             slowing = self.speed_slider.value() < 100
-            self.speed_lbl.setStyleSheet("color:#ff9f43; font-size:11px;")
+            self.speed_lbl.setStyleSheet(
+                f"color:{theme.COLORS['warn']}; font-size:11px;")
             self.speed_lbl.setText("rallento…" if slowing else "elaboro…")
         else:
-            self.speed_lbl.setStyleSheet("color:#e6e8ee; font-size:11px;")
+            self.speed_lbl.setStyleSheet(
+                f"color:{theme.COLORS['text']}; font-size:12px; font-weight:600;")
             self.speed_lbl.setText(f"x{self.speed_slider.value() / 100:.2f}")
             self.pitch_lbl.setText(self._fmt_semis(self.pitch_slider.value()))
 
@@ -1608,7 +1682,7 @@ class MixerTab(QWidget):
     def _on_transform_done(self, buffers, speed: float, semis: float) -> None:
         self._set_xform_busy(False)
         if buffers is None:
-            QMessageBox.warning(self, "Audio", "Elaborazione fallita.")
+            toast(self, "Elaborazione audio fallita.", "error")
             # riallinea i cursori allo stato attuale del motore per non ritentare in loop
             self.speed_slider.blockSignals(True)
             self.speed_slider.setValue(int(round(self.engine.speed * 100)))
@@ -1647,7 +1721,6 @@ class MixerTab(QWidget):
         self._save_session()
 
     def _on_loop_toggle(self, _b: bool) -> None:
-        self.loop_btn.setStyleSheet("background:#3ddc84;color:#14161c;" if self.loop_btn.isChecked() else "")
         self._apply_loop()
 
     def _on_loop_clear(self) -> None:
@@ -1680,7 +1753,8 @@ class MixerTab(QWidget):
         ]
         for label, sp, attr in rows:
             line = QHBoxLayout()
-            lb = QLabel(label); lb.setStyleSheet("color:#8b90a0; font-size:11px;")
+            lb = QLabel(label)
+            lb.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:11px;")
             lb.setFixedWidth(96)
             sp.valueChanged.connect(lambda v, a=attr: setattr(self, a, int(v)))
             line.addWidget(lb); line.addWidget(sp)
@@ -1691,7 +1765,8 @@ class MixerTab(QWidget):
         chk.toggled.connect(self._set_autospeed_active)
         grid.addWidget(chk)
         hint = QLabel("Serve un loop attivo (A-B).")
-        hint.setStyleSheet("color:#6b7080; font-size:10px; font-style:italic;")
+        hint.setStyleSheet(
+            f"color:{theme.COLORS['faint']}; font-size:10px; font-style:italic;")
         grid.addWidget(hint)
 
         wrap = QWidget(); wrap.setLayout(grid)
@@ -1701,16 +1776,13 @@ class MixerTab(QWidget):
         menu.exec(self.autospeed_btn.mapToGlobal(self.autospeed_btn.rect().bottomLeft()))
 
     def _refresh_autospeed_btn(self) -> None:
-        self.autospeed_btn.setStyleSheet(
-            "background:#3ddc84;color:#14161c;" if self._autospeed_on else "")
+        theme.set_state(self.autospeed_btn, "on", self._autospeed_on)
 
     def _set_autospeed_active(self, on: bool) -> None:
         if on:
             if self._loop_a is None and self._loop_b is None:
-                QMessageBox.information(
-                    self, "Loop progressivo",
-                    "Imposta prima un loop (A-B o Ctrl+trascina sulla traccia), "
-                    "poi attiva il loop progressivo.")
+                toast(self, "Imposta prima un loop (A-B o Ctrl+trascina sulla "
+                            "traccia), poi attiva il loop progressivo.", "warn")
                 chk = getattr(self, "_autospeed_chk", None)
                 if chk is not None:
                     chk.blockSignals(True); chk.setChecked(False); chk.blockSignals(False)
@@ -1753,10 +1825,8 @@ class MixerTab(QWidget):
 
     def _on_click_toggle(self, b: bool) -> None:
         self.engine.set_click(b, self.click_vol.value() / 100.0)
-        self.click_btn.setStyleSheet("background:#ff3b5c;color:#fff;" if b else "")
 
     def _on_steady_toggle(self, b: bool) -> None:
-        self.steady_btn.setStyleSheet("background:#3ddc84;color:#14161c;" if b else "")
         self.engine.set_click_style(regular=b)
 
     # ---------- export del mix ----------
@@ -1825,14 +1895,13 @@ class MixerTab(QWidget):
 
         mix, sr = self.engine.render_mix(include_click=include_click)
         if mix is None:
-            QMessageBox.warning(self, "Esporta", "Nessun audio da esportare.")
+            toast(self, "Nessun audio da esportare.", "error")
             return
 
         if want_countin:
             cin, _ = self.engine.render_count_in(countin_beats)
             if cin is None:
-                QMessageBox.warning(
-                    self, "Esporta", "Count-in non disponibile: ri-analizza il brano.")
+                toast(self, "Count-in non disponibile: ri-analizza il brano.", "warn")
             else:
                 # anteponi i click al mix → unico file: click, click… e parte il brano
                 mix = np.concatenate([cin, mix], axis=0)
@@ -1851,15 +1920,14 @@ class MixerTab(QWidget):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as exc:
-            QMessageBox.warning(self, "Esporta", f"Impossibile creare la cartella: {exc}")
+            toast(self, f"Impossibile creare la cartella: {exc}", "error")
             return
 
         cin = None
         if want_countin:
             cin, _ = self.engine.render_count_in(countin_beats)
             if cin is None:
-                QMessageBox.warning(
-                    self, "Esporta", "Count-in non disponibile: ri-analizza il brano.")
+                toast(self, "Count-in non disponibile: ri-analizza il brano.", "warn")
 
         def job_for(name: str):
             # callable: il render avviene nel worker, un mix alla volta in RAM
@@ -1888,7 +1956,7 @@ class MixerTab(QWidget):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as exc:
-            QMessageBox.warning(self, "Esporta", f"Impossibile creare la cartella: {exc}")
+            toast(self, f"Impossibile creare la cartella: {exc}", "error")
             return
         jobs = []
         for t in self.engine.tracks:
@@ -1913,15 +1981,13 @@ class MixerTab(QWidget):
         self.export_btn.setEnabled(True)
         self.export_btn.setText("Esporta…")
         if not ok:
-            QMessageBox.warning(self, "Esporta", f"Esportazione fallita: {info}")
+            toast(self, f"Esportazione fallita: {info}", "error")
         elif getattr(self, "_ex_kind", "mix") == "stems":
-            QMessageBox.information(
-                self, "Esporta", f"Stem esportati in:\n{os.path.dirname(info)}")
+            toast(self, f"Stem esportati in {os.path.dirname(info)}", "ok")
         elif self._ex_kind == "minus":
-            QMessageBox.information(
-                self, "Esporta", f"Basi esportate in:\n{os.path.dirname(info)}")
+            toast(self, f"Basi esportate in {os.path.dirname(info)}", "ok")
         else:
-            QMessageBox.information(self, "Esporta", f"Mix esportato in:\n{info}")
+            toast(self, f"Mix esportato in {info}", "ok")
 
     # ---------- sessione mixer (mix.json nella cartella stem) ----------
 
@@ -1991,8 +2057,7 @@ class MixerTab(QWidget):
             self.loop_btn.blockSignals(True)
             self.loop_btn.setChecked(on)
             self.loop_btn.blockSignals(False)
-            self.loop_btn.setStyleSheet(
-                "background:#3ddc84;color:#14161c;" if on else "")
+            theme.repolish(self.loop_btn)
             self._apply_loop()
 
     def seek_seconds(self, seconds: float) -> None:
@@ -2023,8 +2088,7 @@ class MixerTab(QWidget):
             self.time_lbl.setText(f"{_fmt_time(pos)} / {_fmt_time(dur)}")
         self._refresh_chords()
         self._update_autospeed()
-        if not self.engine.is_playing() and self.play_btn.text() != "▶":
-            self.play_btn.setText("▶")
+        self._sync_play_btn()
 
     def shutdown(self) -> None:
         self._save_session()

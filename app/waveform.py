@@ -7,6 +7,8 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from . import theme
+
 
 def compute_peaks(mono: np.ndarray, columns: int) -> tuple[np.ndarray, np.ndarray]:
     """Riduce un segnale mono a `columns` coppie (min, max) per il disegno."""
@@ -31,8 +33,9 @@ class WaveformWidget(QWidget):
     wheel_zoom = Signal(int, float)        # (passi rotella, centro_frazione_globale)
     wheel_pan = Signal(int)                # (passi rotella; >0 = verso destra)
 
-    def __init__(self, color: str = "#ff3b5c"):
+    def __init__(self, color: str = ""):
         super().__init__()
+        color = color or theme.COLORS["accent"]
         self._mins = np.zeros(0, dtype="float32")
         self._maxs = np.zeros(0, dtype="float32")
         self._color = QColor(color)
@@ -138,7 +141,7 @@ class WaveformWidget(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         mid = h / 2.0
-        p.fillRect(self.rect(), QColor("#10121a"))
+        p.fillRect(self.rect(), QColor(theme.COLORS["wave_bg"]))
         vs, span = self._view_start, self._span()
 
         n = len(self._maxs)

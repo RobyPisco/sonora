@@ -25,13 +25,8 @@ def main() -> int:
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    qss = paths.resource("style.qss")
-    if qss.exists():
-        css = qss.read_text(encoding="utf-8")
-        # i path immagine in QSS vanno con slash; risolti runtime (dev + exe)
-        css = css.replace("__CHECK__", paths.resource("check.svg").as_posix())
-        css = css.replace("__CHEVRON__", paths.resource("chevron.svg").as_posix())
-        app.setStyleSheet(css)
+    from . import theme
+    app.setStyleSheet(theme.load_qss())
 
     # gate licenza: durante la prova (3 giorni) o con licenza valida si prosegue;
     # a prova scaduta serve un codice, altrimenti l'app non parte.

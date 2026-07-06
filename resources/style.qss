@@ -1,129 +1,166 @@
-/* Sonora — tema scuro moderno */
+/* Sonora — tema scuro pro-audio (token risolti da app/theme.py) */
 
 * {
-    font-family: "Segoe UI", "Inter", sans-serif;
-    font-size: 16px;
-    color: #e6e8ee;
+    font-family: "Segoe UI Variable Display", "Segoe UI", "Inter", sans-serif;
+    font-size: @tok(fs_base);
+    color: @tok(text);
 }
 
 QWidget#Root {
-    background: #14161c;
+    background: @tok(bg);
 }
 
-QTabWidget::pane {
-    border: none;
-    background: #14161c;
+/* ══ Shell: rail di navigazione laterale ══ */
+QFrame#NavRail {
+    background: @tok(panel);
+    border-right: 1px solid @tok(border);
 }
-QTabBar {
-    background: #14161c;
-}
-QTabBar::tab {
-    background: #1c1f28;
-    color: #8b90a0;
-    padding: 13px 32px;
-    border: none;
-    font-weight: 600;
-    font-size: 17px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected {
-    background: #14161c;
-    color: #ffffff;
-    border-bottom: 2px solid #ff3b5c;
-}
-QTabBar::tab:hover { color: #e6e8ee; }
-
-QScrollArea {
-    background: #14161c;
-    border: none;
-}
-QScrollArea > QWidget > QWidget {
+QPushButton#RailBtn {
     background: transparent;
-}
-
-QLabel#Title {
-    font-size: 36px;
-    font-weight: 700;
-    color: #ffffff;
-}
-
-QLabel#Subtitle {
-    color: #8b90a0;
-    font-size: 16px;
-}
-
-QFrame#Footer {
-    background: #14161c;
-    border-top: 1px solid #232733;
-}
-
-QLabel.SectionLabel {
-    color: #8b90a0;
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-/* Card / pannelli */
-QFrame#Card {
-    background: #1c1f28;
-    border: 1px solid #2a2e3a;
-    border-radius: 14px;
-}
-
-/* Mixer — card di analisi compatte (TONALITÀ / BPM / SCALA …) in alto a destra */
-QFrame#StatCard {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b1e2a, stop:1 #13151f);
-    border: 1px solid #252836;
+    border: none;
     border-radius: 12px;
 }
-QFrame#StatCard:hover {
-    border: 1px solid #ff3b5c;
+QPushButton#RailBtn:hover { background: @tok(panel2); }
+QPushButton#RailBtn:checked { background: @tok(raise); }
+QLabel#RailLogo {
+    background: @tok(accent);
+    color: #ffffff;
+    font-size: @tok(fs_lead);
+    font-weight: 800;
+    border-radius: 10px;
 }
 
-/* Mixer — pannello controlli di una traccia (pannello sinistro) */
+/* ══ Shell: barra player globale in basso ══ */
+QFrame#PlayBar {
+    background: @tok(panel);
+    border-top: 1px solid @tok(border);
+}
+QLabel#PlayTitle { font-size: @tok(fs_base); font-weight: 600; }
+QLabel#PlaySub   { font-size: @tok(fs_caption); color: @tok(muted); }
+QLabel#TimeLabel {
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: @tok(fs_caption);
+    color: @tok(muted);
+}
+QFrame#SongArt {
+    background: @tok(panel2);
+    border: 1px solid @tok(border);
+    border-radius: 8px;
+}
+QFrame#TaskChip {
+    background: @tok(panel2);
+    border: 1px solid @tok(border);
+    border-radius: 14px;
+}
+QFrame#TaskChip QLabel { font-size: @tok(fs_small); color: @tok(muted); }
+QFrame#TaskChip QProgressBar {
+    background: @tok(raise);
+    border: none;
+    border-radius: 2px;
+    max-height: 4px;
+}
+QFrame#TaskChip QProgressBar::chunk { background: @tok(accent); border-radius: 2px; }
+
+/* ══ Tipografia ══ */
+QLabel#Title    { font-size: @tok(fs_display); font-weight: 700; color: #ffffff; }
+QLabel#H1       { font-size: @tok(fs_h1); font-weight: 700; color: #ffffff; }
+QLabel#Subtitle { color: @tok(muted); font-size: @tok(fs_mid); }
+QLabel[class="SectionLabel"] {
+    color: @tok(faint);
+    font-size: @tok(fs_caption);
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+QLabel[class="Eyebrow"] {
+    color: @tok(faint);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+QLabel[class="Hint"] { color: @tok(faint); font-size: @tok(fs_caption); }
+QLabel[class="Muted"] { color: @tok(muted); font-size: @tok(fs_small); }
+
+QScrollArea { background: transparent; border: none; }
+QScrollArea > QWidget > QWidget { background: transparent; }
+
+/* ══ Card / pannelli ══ */
+QFrame#Card {
+    background: @tok(panel);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_lg);
+}
+QFrame#StatCard {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @tok(panel2), stop:1 @tok(panel));
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_md);
+}
+QFrame#StatCard:hover { border: 1px solid @tok(accent); }
+
 QFrame#StripPanel {
-    background: #12141b;
+    background: @tok(panel);
     border: none;
-    border-right: 1px solid #1e2230;
+    border-right: 1px solid @tok(strip_sep);
 }
-
-/* Mixer — barra di trasporto inferiore */
 QFrame#TransportBar {
-    background: #12141b;
-    border-top: 1px solid #1e2230;
+    background: @tok(panel);
+    border-top: 1px solid @tok(border);
 }
-
-/* Mixer — riga header (titolo + cards) e righe meta (sezioni/accordo) */
-QFrame#MixerHeader, QFrame#MixerMeta {
-    background: transparent;
-    border: none;
+QFrame#TransportGroup {
+    background: @tok(panel2);
+    border: 1px solid @tok(border);
+    border-radius: 12px;
 }
+QFrame#MixerHeader, QFrame#MixerMeta { background: transparent; border: none; }
 
-/* Input testo */
+/* ══ Banner inline / Toast ══ */
+QFrame#Banner {
+    background: rgba(255, 159, 67, 8%);
+    border: 1px solid rgba(255, 159, 67, 35%);
+    border-radius: @tok(r_md);
+}
+QFrame#Banner[kind="info"] {
+    background: rgba(74, 168, 255, 8%);
+    border: 1px solid rgba(74, 168, 255, 35%);
+}
+QFrame#Banner[kind="error"] {
+    background: rgba(255, 93, 93, 8%);
+    border: 1px solid rgba(255, 93, 93, 35%);
+}
+QFrame#Banner QLabel { font-size: @tok(fs_small); background: transparent; }
+
+QFrame#Toast {
+    background: @tok(raise);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_md);
+}
+QFrame#Toast[kind="ok"]    { border: 1px solid @tok(ok); }
+QFrame#Toast[kind="warn"]  { border: 1px solid @tok(warn); }
+QFrame#Toast[kind="error"] { border: 1px solid @tok(err); }
+QFrame#Toast QLabel { font-size: @tok(fs_small); background: transparent; }
+
+/* ══ Input testo ══ */
 QLineEdit {
-    background: #232733;
-    border: 1px solid #323748;
-    border-radius: 10px;
-    padding: 14px 16px;
-    selection-background-color: #ff3b5c;
+    background: @tok(input);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_md);
+    padding: 10px 14px;
+    selection-background-color: @tok(accent);
 }
-QLineEdit:focus {
-    border: 1px solid #ff3b5c;
-    background: #262b38;
-}
+QLineEdit:focus { border: 1px solid @tok(accent); background: @tok(raise); }
+QLineEdit:disabled { color: @tok(faint); background: @tok(panel2); }
 
-/* Combo */
+QPlainTextEdit, QTextEdit { selection-background-color: @tok(accent); }
+
+/* ══ Combo ══ */
 QComboBox {
-    background: #232733;
-    border: 1px solid #323748;
-    border-radius: 10px;
-    padding: 12px 16px;
-    min-height: 26px;
+    background: @tok(input);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_md);
+    padding: 8px 14px;
+    min-height: 24px;
 }
 QComboBox:hover { border: 1px solid #4a5066; }
-QComboBox:focus { border: 1px solid #ff3b5c; }
+QComboBox:focus { border: 1px solid @tok(accent); }
 QComboBox::drop-down { border: none; width: 28px; }
 QComboBox::down-arrow {
     image: url(__CHEVRON__);
@@ -132,198 +169,295 @@ QComboBox::down-arrow {
     margin-right: 10px;
 }
 QComboBox QAbstractItemView {
-    background: #232733;
-    border: 1px solid #323748;
-    border-radius: 8px;
-    selection-background-color: #ff3b5c;
+    background: @tok(raise);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_sm);
+    selection-background-color: @tok(accent);
     outline: none;
     padding: 4px;
 }
 
-/* Bottoni */
-QPushButton {
-    background: #2a2e3a;
-    border: 1px solid #353a48;
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-weight: 600;
+/* ══ SpinBox (popup autospeed / export) ══ */
+QSpinBox {
+    background: @tok(input);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_sm);
+    padding: 4px 8px;
 }
+QSpinBox:focus { border: 1px solid @tok(accent); }
 
-/* Pulsantini stretti del mixer (M/S, A/B, Loop, ×, Click): padding minimo
-   per non tagliare il testo, indipendente dal padding generale. */
-QPushButton#GhostMini {
-    background: #161822;
-    border: 1px solid #262a35;
-    border-radius: 8px;
-    padding: 6px 4px;
+/* ══ Bottoni ══ */
+QPushButton {
+    background: @tok(raise);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_md);
+    padding: 9px 16px;
+    font-weight: 600;
+    font-size: @tok(fs_base);
 }
-QPushButton#GhostMini:hover {
-    background: #1f222e;
-    border: 1px solid #ff3b5c;
-}
-QPushButton:hover { background: #323848; }
-QPushButton:pressed { background: #272c38; }
-QPushButton:disabled { color: #5a5f70; background: #20232c; }
+QPushButton:hover { background: #2b3145; }
+QPushButton:pressed { background: #1d212e; }
+QPushButton:disabled { color: @tok(faint); background: @tok(panel2); }
+QPushButton:focus { border: 1px solid @tok(accent); }
 
 QPushButton#Primary {
-    background: #ff3b5c;
+    background: @tok(accent);
     border: none;
     color: #ffffff;
 }
-QPushButton#Primary:hover { background: #ff5170; }
-QPushButton#Primary:pressed { background: #e62e4d; }
+QPushButton#Primary:hover { background: @tok(accent_hover); }
+QPushButton#Primary:pressed { background: @tok(accent_press); }
 QPushButton#Primary:disabled { background: #5c2a36; color: #b58b94; }
+QPushButton#Primary:focus { border: 1px solid #ffffff; }
 
 QPushButton#Ghost {
     background: transparent;
-    border: 1px solid #353a48;
+    border: 1px solid @tok(border2);
 }
-QPushButton#Ghost:hover { background: #232733; }
+QPushButton#Ghost:hover { background: @tok(panel2); }
 
-/* Slider orizzontali (mixer: velocità, tono, master, pan) */
+/* Pulsantini compatti (M/S, A/B, Loop, zoom, preset…) */
+QPushButton#GhostMini {
+    background: @tok(panel);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_sm);
+    padding: 5px 8px;
+    font-size: @tok(fs_small);
+    color: @tok(muted);
+}
+QPushButton#GhostMini:hover {
+    background: @tok(panel2);
+    border: 1px solid @tok(accent);
+    color: @tok(text);
+}
+QPushButton#GhostMini:disabled { color: @tok(faint); background: @tok(panel); }
+
+/* Stati attivi via dynamic property `accent` (:checked o [on="true"]).
+   Le varianti #GhostMini servono per battere la specificità del selettore id. */
+QPushButton[accent="ok"]:checked, QPushButton[accent="ok"][on="true"],
+QPushButton#GhostMini[accent="ok"]:checked, QPushButton#GhostMini[accent="ok"][on="true"] {
+    background: @tok(ok); border: 1px solid @tok(ok); color: @tok(bg);
+}
+QPushButton[accent="warn"]:checked, QPushButton[accent="warn"][on="true"],
+QPushButton#GhostMini[accent="warn"]:checked, QPushButton#GhostMini[accent="warn"][on="true"] {
+    background: @tok(warn); border: 1px solid @tok(warn); color: @tok(bg);
+}
+QPushButton[accent="danger"]:checked, QPushButton[accent="danger"][on="true"],
+QPushButton#GhostMini[accent="danger"]:checked, QPushButton#GhostMini[accent="danger"][on="true"] {
+    background: @tok(accent); border: 1px solid @tok(accent); color: #ffffff;
+}
+QPushButton[accent="solo"]:checked, QPushButton[accent="solo"][on="true"],
+QPushButton#GhostMini[accent="solo"]:checked, QPushButton#GhostMini[accent="solo"][on="true"] {
+    background: @tok(solo); border: 1px solid @tok(solo); color: @tok(bg);
+}
+
+/* Chip toggle (opzioni Scarica) */
+QPushButton#Chip {
+    background: @tok(panel2);
+    border: 1px solid @tok(border2);
+    border-radius: 15px;
+    padding: 5px 14px;
+    color: @tok(muted);
+    font-size: @tok(fs_small);
+    font-weight: 600;
+}
+QPushButton#Chip:hover { color: @tok(text); }
+QPushButton#Chip:checked {
+    border: 1px solid @tok(accent);
+    color: @tok(text);
+    background: rgba(255, 59, 92, 10%);
+}
+
+/* Play tondo (mixer + playbar) */
+QPushButton#PlayButton {
+    background: @tok(accent);
+    border: none;
+    color: #ffffff;
+    border-radius: 23px;
+}
+QPushButton#PlayButton:hover { background: @tok(accent_hover); }
+QPushButton#PlayButton:pressed { background: @tok(accent_press); }
+QPushButton#PlayButton:disabled { background: #5c2a36; }
+
+/* ══ Slider ══ */
 QSlider { background: transparent; border: none; }
 QSlider::groove:horizontal {
     height: 5px;
-    background: #1a1d26;
+    background: @tok(raise);
     border: none;
-    border-radius: 2.5px;
+    border-radius: 2px;
 }
-QSlider::sub-page:horizontal {
-    background: #ff3b5c;
-    border: none;
-    border-radius: 2.5px;
-}
+QSlider::sub-page:horizontal { background: @tok(accent); border: none; border-radius: 2px; }
 QSlider::handle:horizontal {
     background: #ffffff;
-    width: 12px;
-    height: 12px;
-    margin: -3.5px 0;
+    width: 12px; height: 12px;
+    margin: -4px 0;
     border-radius: 6px;
     border: 1px solid #cdd1de;
 }
-QSlider::handle:horizontal:hover {
-    background: #ffffff;
-    border: 2px solid #ff3b5c;
-}
-QSlider::handle:horizontal:disabled {
-    background: #5a5f70;
-    border: none;
-}
+QSlider::handle:horizontal:hover { background: #ffffff; border: 2px solid @tok(accent); }
+QSlider::handle:horizontal:disabled { background: @tok(faint); border: none; }
 QSlider::groove:vertical {
     width: 5px;
-    background: #1a1d26;
+    background: @tok(raise);
     border: none;
-    border-radius: 2.5px;
+    border-radius: 2px;
 }
 QSlider::handle:vertical {
     background: #ffffff;
-    width: 12px;
-    height: 12px;
-    margin: 0 -3.5px;
+    width: 12px; height: 12px;
+    margin: 0 -4px;
     border-radius: 6px;
     border: 1px solid #cdd1de;
 }
-QSlider::handle:vertical:hover {
-    background: #ffffff;
-    border: 2px solid #ff3b5c;
-}
+QSlider::handle:vertical:hover { background: #ffffff; border: 2px solid @tok(accent); }
 
-/* Checkbox */
-QCheckBox { spacing: 12px; }
+/* ══ Checkbox ══ */
+QCheckBox { spacing: 10px; }
 QCheckBox::indicator {
-    width: 22px; height: 22px;
-    border: 1px solid #3a4050;
+    width: 20px; height: 20px;
+    border: 1px solid @tok(border2);
     border-radius: 5px;
-    background: #232733;
+    background: @tok(input);
 }
-QCheckBox::indicator:unchecked:hover {
-    border: 1px solid #4a5066;
-}
+QCheckBox::indicator:unchecked:hover { border: 1px solid #4a5066; }
 QCheckBox::indicator:checked {
-    background: #ff3b5c;
-    border: 1px solid #ff3b5c;
+    background: @tok(accent);
+    border: 1px solid @tok(accent);
     image: url(__CHECK__);
 }
 
-/* Lista coda */
+/* Interruttore (pagina Impostazioni) */
+QCheckBox#Switch::indicator {
+    width: 40px; height: 22px;
+    border-radius: 11px;
+    border: none;
+    background: @tok(raise);
+    image: none;
+}
+QCheckBox#Switch::indicator:hover { background: #2b3145; }
+QCheckBox#Switch::indicator:checked {
+    background: @tok(accent);
+    image: url(__CHECK__);
+}
+
+/* ══ Radio ══ */
+QRadioButton { spacing: 10px; }
+QRadioButton::indicator {
+    width: 18px; height: 18px;
+    border: 1px solid @tok(border2);
+    border-radius: 9px;
+    background: @tok(input);
+}
+QRadioButton::indicator:checked {
+    border: 5px solid @tok(accent);
+    background: #ffffff;
+}
+
+/* ══ Liste ══ */
 QListWidget {
-    background: #161922;
-    border: 1px solid #262a36;
-    border-radius: 10px;
+    background: @tok(panel);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_md);
     padding: 6px;
     outline: none;
 }
 QListWidget::item {
-    border-radius: 8px;
+    border-radius: @tok(r_sm);
     padding: 0px;
     margin: 2px 0px;
 }
-QListWidget::item:selected { background: #232733; }
+QListWidget::item:selected { background: @tok(raise); }
 
-/* Progress */
+/* nav della pagina Impostazioni */
+QListWidget#SetNav { background: transparent; border: none; }
+QListWidget#SetNav::item {
+    padding: 9px 14px;
+    border-radius: @tok(r_md);
+    color: @tok(muted);
+    margin: 1px 0px;
+}
+QListWidget#SetNav::item:hover { background: @tok(panel2); }
+QListWidget#SetNav::item:selected {
+    background: @tok(panel2);
+    color: @tok(text);
+    font-weight: 600;
+}
+
+/* ══ Chip di stato coda ══ */
+QLabel#StatusChip {
+    font-size: @tok(fs_caption);
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 9px;
+    background: @tok(raise);
+    color: @tok(muted);
+}
+QLabel#StatusChip[status="fatto"]       { background: rgba(61, 220, 132, 13%); color: @tok(ok); }
+QLabel#StatusChip[status="errore"]      { background: rgba(255, 93, 93, 13%);  color: @tok(err); }
+QLabel#StatusChip[status="scaricando"]  { background: rgba(74, 168, 255, 13%); color: @tok(info); }
+QLabel#StatusChip[status="conversione"] { background: rgba(255, 159, 67, 13%); color: @tok(warn); }
+QLabel#StatusChip[status="stem"]        { background: rgba(255, 59, 92, 13%);  color: @tok(accent); }
+
+/* ══ Progress ══ */
 QProgressBar {
-    background: #232733;
+    background: @tok(raise);
     border: none;
-    border-radius: 6px;
-    height: 8px;
+    border-radius: 3px;
+    max-height: 6px;
     text-align: center;
     color: transparent;
 }
-QProgressBar::chunk {
-    background: #ff3b5c;
-    border-radius: 6px;
-}
+QProgressBar::chunk { background: @tok(accent); border-radius: 3px; }
 
-/* Log */
+/* ══ Log ══ */
 QPlainTextEdit#Log {
-    background: #0f1116;
-    border: 1px solid #232733;
-    border-radius: 10px;
-    color: #9aa0b0;
+    background: @tok(wave_bg);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_md);
+    color: @tok(muted);
     font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 15px;
+    font-size: @tok(fs_small);
     padding: 10px;
 }
 
-/* Scrollbar */
-QScrollBar:vertical {
-    background: transparent; width: 10px; margin: 2px;
+/* ══ Testi / karaoke ══ */
+QTextEdit#LyricsView {
+    background: @tok(wave_bg);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_md);
+    color: @tok(text);
+    padding: 20px;
 }
-QScrollBar::handle:vertical {
-    background: #353a48; border-radius: 5px; min-height: 30px;
+QListWidget#LyricsResults {
+    background: @tok(panel);
+    border: 1px solid @tok(border);
+    border-radius: @tok(r_md);
+    color: @tok(text);
+    padding: 6px;
 }
+QListWidget#LyricsResults::item {
+    padding: 8px 12px;
+    border-bottom: 1px solid @tok(border);
+}
+QListWidget#LyricsResults::item:selected { background: @tok(accent); color: #ffffff; }
+
+/* ══ Scrollbar ══ */
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: @tok(border2); border-radius: 5px; min-height: 30px; }
 QScrollBar::handle:vertical:hover { background: #454b5c; }
-QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle:horizontal { background: @tok(border2); border-radius: 5px; min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #454b5c; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
-/* Mixer — contenitore strisce tracce, i 1px di spacing fungono da bordi/separatori */
-QWidget#StripsHost {
-    background: #1e2230;
-}
+/* ══ Mixer ══ */
+QWidget#StripsHost { background: @tok(strip_sep); }
 
-/* Mixer — pulsante Play centrale rotondo */
-QPushButton#PlayButton {
-    background: #ff3b5c;
-    border: none;
-    color: #ffffff;
-    border-radius: 20px;
-    font-size: 16px;
-}
-QPushButton#PlayButton:hover {
-    background: #ff5170;
-}
-QPushButton#PlayButton:pressed {
-    background: #e62e4d;
-}
-QPushButton#PlayButton:disabled {
-    background: #5c2a36;
-    color: #b58b94;
-}
-
-/* Mixer — scrollbar orizzontale dello zoom waveform */
 QScrollBar#ZoomScrollBar:horizontal {
     border: none;
-    background: #10121a;
+    background: @tok(wave_bg);
     height: 10px;
     margin: 0px;
 }
@@ -332,12 +466,39 @@ QScrollBar#ZoomScrollBar::handle:horizontal {
     min-width: 20px;
     border-radius: 5px;
 }
-QScrollBar#ZoomScrollBar::handle:horizontal:hover {
-    background: #434c5e;
-}
+QScrollBar#ZoomScrollBar::handle:horizontal:hover { background: #434c5e; }
 QScrollBar#ZoomScrollBar::add-line:horizontal, QScrollBar#ZoomScrollBar::sub-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
+    border: none; background: none; width: 0px;
 }
 
+/* ══ Splitter ══ */
+QSplitter::handle { background: @tok(border); width: 2px; }
+QSplitter::handle:hover { background: @tok(accent); }
+
+/* ══ Menu ══ */
+QMenu {
+    background: @tok(panel2);
+    border: 1px solid @tok(border2);
+    border-radius: @tok(r_md);
+    padding: 6px;
+}
+QMenu::item {
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: @tok(fs_base);
+}
+QMenu::item:selected { background: @tok(raise); }
+QMenu::item:disabled { color: @tok(faint); }
+QMenu::separator { height: 1px; background: @tok(border); margin: 5px 8px; }
+
+/* ══ Tooltip ══ */
+QToolTip {
+    background: @tok(raise);
+    color: @tok(text);
+    border: 1px solid @tok(border2);
+    padding: 6px 9px;
+    font-size: @tok(fs_small);
+}
+
+/* ══ Dialoghi ══ */
+QMessageBox QPushButton, QDialogButtonBox QPushButton { min-width: 84px; }

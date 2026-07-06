@@ -33,13 +33,15 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from . import theme
+from .toast import toast
 
 # Timestamp LRC: [mm:ss], [mm:ss.cc], [mm:ss.mmm] (anche più d'uno per riga).
 # I tag metadata tipo [ar:...] non matchano (servono cifre in entrambi i gruppi).
@@ -178,49 +180,26 @@ class LyricsTab(QWidget):
 
         # Barra di stato
         self.status_lbl = QLabel("Carica un brano nel Mixer per vedere il testo.")
-        self.status_lbl.setStyleSheet("color:#8b90a0; font-size:13px; font-style:italic;")
+        self.status_lbl.setStyleSheet(
+            f"color:{theme.COLORS['muted']}; font-size:13px; font-style:italic;")
         root.addWidget(self.status_lbl)
 
         # Splitter principale: Area Testo (sinistra) e Risultati Ricerca (destra)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(self.splitter, 1)
 
-        # Editor di testo
+        # Editor di testo (stile nel QSS centrale, selettore #LyricsView)
         self.text_edit = QTextEdit()
+        self.text_edit.setObjectName("LyricsView")
         self.text_edit.setReadOnly(True)
-        self.text_edit.setStyleSheet("""
-            QTextEdit {
-                background: #0f1116;
-                border: 1px solid #232733;
-                border-radius: 10px;
-                color: #e6e8ee;
-                padding: 20px;
-            }
-        """)
         self.text_edit.setFont(QFont("Segoe UI", 12))
         # click su una riga in modalità karaoke = seek nel brano
         self.text_edit.viewport().installEventFilter(self)
         self.splitter.addWidget(self.text_edit)
 
-        # Lista risultati ricerca (nascosta di default)
+        # Lista risultati ricerca (nascosta di default; stile nel QSS centrale)
         self.results_list = QListWidget()
-        self.results_list.setStyleSheet("""
-            QListWidget {
-                background: #1c1f28;
-                border: 1px solid #2a2e3a;
-                border-radius: 10px;
-                color: #e6e8ee;
-                padding: 6px;
-            }
-            QListWidget::item {
-                padding: 8px 12px;
-                border-bottom: 1px solid #2a2e3a;
-            }
-            QListWidget::item:selected {
-                background: #ff3b5c;
-                color: white;
-            }
-        """)
+        self.results_list.setObjectName("LyricsResults")
         self.results_list.itemClicked.connect(self._on_result_clicked)
         self.splitter.addWidget(self.results_list)
         self.results_list.hide()
@@ -282,7 +261,7 @@ class LyricsTab(QWidget):
 
         self.status_lbl.setText(f"Ricerca automatica testo per '{song_name}' su LRCLIB...")
         self.text_edit.setHtml(
-            "<div style='text-align:center; color:#8b90a0;'><br><br>"
+            f"<div style='text-align:center; color:{theme.COLORS['muted']};'><br><br>"
             "Ricerca automatica del testo in corso...</div>"
         )
 
@@ -315,7 +294,7 @@ class LyricsTab(QWidget):
                 self.status_lbl.setText("Testo scaricato automaticamente e salvato in locale.")
         else:
             self.text_edit.setHtml(
-                "<div style='text-align:center; color:#8b90a0;'><br><br>"
+                f"<div style='text-align:center; color:{theme.COLORS['muted']};'><br><br>"
                 "Nessun testo trovato automaticamente.<br>"
                 "Usa il campo in alto per cercare manualmente.</div>"
             )
@@ -334,7 +313,9 @@ class LyricsTab(QWidget):
             line_stripped = line.strip()
             # Evidenzia i tag di sezione (es. [Chorus], [Verse 1]...) in arancione grassetto
             if line_stripped.startswith("[") and line_stripped.endswith("]"):
-                html_lines.append(f"<br><b style='color:#ff9f43; font-size:15px;'>{line_stripped}</b>")
+                html_lines.append(
+                    f"<br><b style='color:{theme.COLORS['warn']};"
+                    f" font-size:15px;'>{line_stripped}</b>")
             else:
                 html_lines.append(line_stripped)
 
@@ -371,11 +352,11 @@ class LyricsTab(QWidget):
     def _char_fmt(current: bool) -> QTextCharFormat:
         fmt = QTextCharFormat()
         if current:
-            fmt.setForeground(QBrush(QColor("#ff9f43")))
+            fmt.setForeground(QBrush(QColor("#ffffff")))
             fmt.setFontWeight(QFont.Weight.Bold)
-            fmt.setFontPointSize(17)
+            fmt.setFontPointSize(19)
         else:
-            fmt.setForeground(QBrush(QColor("#8b90a0")))
+            fmt.setForeground(QBrush(QColor(theme.COLORS["muted"])))
             fmt.setFontWeight(QFont.Weight.Normal)
             fmt.setFontPointSize(13)
         return fmt
@@ -486,7 +467,7 @@ class LyricsTab(QWidget):
         lyrics = (data.get("plainLyrics") or "").strip()
         synced = (data.get("syncedLyrics") or "").strip()
         if not lyrics and not synced:
-            QMessageBox.warning(self, "Testo vuoto", "Questo risultato non contiene un testo disponibile.")
+            toast(self, "Questo risultato non contiene un testo disponibile.", "warn")
             return
 
         self._reset_synced()

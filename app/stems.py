@@ -752,6 +752,31 @@ def _last_error_line(lines: list[str]) -> str:
     return ""
 
 
+# Quanti modelli interni ha ogni "bag" demucs: ognuno stampa la propria barra
+# tqdm 0-100%, quindi serve saperlo per rimappare il progresso su un'unica barra.
+_BAG_SIZE = {"htdemucs_ft": 4, "htdemucs_6s": 1, "htdemucs": 1}
+
+
+def _multipass_progress(progress_cb: ProgCb, passes: int) -> ProgCb:
+    """Rimappa le N barre 0-100% consecutive di demucs (modelli del bag ×
+    shifts) su un unico 0-100% monotono: quando la percentuale letta cala,
+    è iniziata la passata successiva. Senza questo la barra della UI riparte
+    da zero a ogni passata."""
+    state = {"pass": 0, "last": 0.0, "best": -1.0}
+
+    def cb(p: float) -> None:
+        p = max(0.0, min(100.0, p))
+        if p < state["last"] and state["pass"] < passes - 1:
+            state["pass"] += 1
+        state["last"] = p
+        overall = (state["pass"] * 100.0 + p) / passes
+        if overall > state["best"]:
+            state["best"] = overall
+            progress_cb(overall)
+
+    return cb
+
+
 def _run_demucs(src: Path, model: str, out_format: str, two_stems: bool,
                 log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> Path:
     """Esegue demucs per un modello. Ritorna la cartella con gli stem prodotti."""
@@ -799,11 +824,14 @@ def _run_demucs(src: Path, model: str, out_format: str, two_stems: bool,
         tail = []
         log_cb(f"Separo «{src.stem}» — {model} su {device.upper()}…")
 
-        def on_text(line: str, _tail: list[str] = tail) -> None:
+        shifts = int(extra[extra.index("--shifts") + 1]) if "--shifts" in extra else 1
+        prog = _multipass_progress(progress_cb, _BAG_SIZE.get(model, 1) * shifts)
+
+        def on_text(line: str, _tail: list[str] = tail, _prog: ProgCb = prog) -> None:
             m = _PCT.search(line)
             if m:
                 try:
-                    progress_cb(float(m.group(1)))
+                    _prog(float(m.group(1)))
                 except ValueError:
                     pass
             else:

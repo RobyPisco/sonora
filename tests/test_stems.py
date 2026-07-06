@@ -334,3 +334,30 @@ def test_step_progress_clampa_fuori_range():
     cb(-10.0)
     cb(150.0)
     assert seen == [0.0, 50.0]
+
+
+def test_multipass_progress_rimappa_barre_consecutive():
+    """Due barre tqdm 0-100% consecutive diventano un unico 0-100% continuo."""
+    seen = []
+    cb = stems._multipass_progress(seen.append, 2)
+    for p in (50.0, 100.0, 0.0, 50.0, 100.0):
+        cb(p)
+    assert seen == [25.0, 50.0, 75.0, 100.0]
+
+
+def test_multipass_progress_monotono_con_barre_extra():
+    """Più barre del previsto: il progresso non supera 100 e non torna indietro."""
+    seen = []
+    cb = stems._multipass_progress(seen.append, 2)
+    for p in (100.0, 0.0, 100.0, 0.0, 100.0):
+        cb(p)
+    assert seen == [50.0, 100.0]
+    assert seen == sorted(seen)
+
+
+def test_multipass_progress_passata_singola_inalterata():
+    seen = []
+    cb = stems._multipass_progress(seen.append, 1)
+    for p in (0.0, 40.0, 100.0):
+        cb(p)
+    assert seen == [0.0, 40.0, 100.0]

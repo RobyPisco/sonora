@@ -178,12 +178,14 @@ class PlayBar(QFrame):
     def task_update(self, text: str, pct: float | None = None,
                     cancellable: bool = False) -> None:
         """Mostra/aggiorna il chip attività. pct=None → barra indeterminata."""
-        self.task_lbl.setText(text)
         if pct is None:
+            self.task_lbl.setText(text)
             self.task_bar.setRange(0, 0)
         else:
+            pct = max(0.0, min(100.0, pct))
+            self.task_lbl.setText(f"{text} · {pct:.0f}%")
             self.task_bar.setRange(0, 100)
-            self.task_bar.setValue(int(max(0.0, min(100.0, pct))))
+            self.task_bar.setValue(int(pct))
         self.task_cancel_btn.setVisible(cancellable)
         self.task_chip.show()
         if not self._task_active:

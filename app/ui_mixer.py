@@ -771,6 +771,8 @@ class MixerTab(QWidget):
         self._view: list[float] = [0.0, 1.0]
         # beat grid: frazioni dei beat correnti (per mostrarle/nasconderle)
         self._beat_fracs: list[float] = []
+        # True quando l'analisi ha prodotto i beat (metronomo/griglia/count-in)
+        self._beats_ready = False
         # loop progressivo (auto-incremento velocità)
         self._autospeed_on = False
         self._autospeed_start = 60   # %
@@ -1072,6 +1074,8 @@ class MixerTab(QWidget):
         self.click_btn.setObjectName("GhostMini"); self.click_btn.setMinimumWidth(60)
         self.click_btn.setProperty("accent", "danger")
         self.click_btn.setIcon(icons.icon("metronome", mut, 13, on_color="#ffffff"))
+        self.click_btn.setToolTip(
+            "Metronomo sincronizzato sui beat (richiede l'analisi del brano).")
         self.click_btn.toggled.connect(self._on_click_toggle)
         # toggle griglia regolare (steady) vs beat rilevati
         self.steady_btn = QPushButton("Steady"); self.steady_btn.setCheckable(True)
@@ -1255,7 +1259,7 @@ class MixerTab(QWidget):
         self._loop_a = self._loop_b = None
         self.loop_btn.setChecked(False)
         self.click_btn.setChecked(False)
-        self.click_btn.setEnabled(False)
+        self._beats_ready = False
 
         # analisi: usa la cache se c'è, altrimenti analizza subito da solo
         data = stems.load_analysis(folder)
@@ -1368,6 +1372,10 @@ class MixerTab(QWidget):
         self._apply_view()
 
     def _on_beatgrid_toggle(self, on: bool) -> None:
+        # la griglia resta attivabile anche senza analisi (si popolerà dopo),
+        # ma avvisa perché al momento non si vedrebbe nulla
+        if on and self._folder and not self._beat_fracs:
+            self._needs_analysis("Griglia beat")
         fr = self._beat_fracs if on else []
         for s in getattr(self, "strips", []):
             s.wave.set_beats(fr)
@@ -1390,6 +1398,7 @@ class MixerTab(QWidget):
         self._build_sections()
         self._update_section_markers()
         self._beat_fracs = []
+        self._beats_ready = False
         for s in getattr(self, "strips", []):
             s.wave.set_beats([])
         if hasattr(self, "timeline"):
@@ -1409,11 +1418,13 @@ class MixerTab(QWidget):
         pres = d.get("presence", {})
         for name in STEM_ORDER:
             self.presence_lbls[name].setText(f"{pres[name]}%" if name in pres else "—")
-        # metronomo: abilita se ci sono i beat
+        # metronomo: disponibile se ci sono i beat
         beats = d.get("beat_times") or []
         self.engine.set_beats(beats)
-        self.click_btn.setEnabled(bool(beats))
+        self._beats_ready = bool(beats)
         self.click_btn.setToolTip("" if beats else "Ri-analizza per abilitare il metronomo.")
+        if not beats and self.click_btn.isChecked():
+            self.click_btn.setChecked(False)
         # beat grid sulle waveform (rispetta il toggle Griglia)
         dur = float(d.get("duration") or self.engine.duration() or 0.0)
         self._beat_fracs = [t / dur for t in beats if dur > 0 and 0.0 < t < dur]
@@ -1823,7 +1834,26 @@ class MixerTab(QWidget):
 
     # ---------- metronomo ----------
 
+    def _needs_analysis(self, what: str) -> bool:
+        """True (con toast esplicativo) se `what` richiede un'analisi non ancora
+        fatta: meglio dire perché non funziona che ignorare il clic."""
+        if self._beats_ready:
+            return False
+        if not self._folder:
+            toast(self, f"{what}: carica prima degli stem nel Mixer.", "warn")
+        elif self._an_thread and self._an_thread.isRunning():
+            toast(self, f"{what}: analisi in corso, riprova tra poco…", "warn")
+        else:
+            toast(self, f"{what}: prima analizza il brano (pulsante «Analizza» "
+                        "in alto a destra).", "warn")
+        return True
+
     def _on_click_toggle(self, b: bool) -> None:
+        if b and self._needs_analysis("Metronomo"):
+            self.click_btn.blockSignals(True)
+            self.click_btn.setChecked(False)
+            self.click_btn.blockSignals(False)
+            return
         self.engine.set_click(b, self.click_vol.value() / 100.0)
 
     def _on_steady_toggle(self, b: bool) -> None:
@@ -1860,7 +1890,7 @@ class MixerTab(QWidget):
     def _on_export(self) -> None:
         if not self.engine.tracks or (self._ex_thread and self._ex_thread.isRunning()):
             return
-        dlg = ExportOptionsDialog(self, click_available=self.click_btn.isEnabled())
+        dlg = ExportOptionsDialog(self, click_available=self._beats_ready)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         what, fmt, include_click, want_countin, countin_beats = dlg.options()

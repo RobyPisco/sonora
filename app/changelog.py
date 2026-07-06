@@ -12,6 +12,14 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.7.2", [
+        "La barra di avanzamento della separazione stem ora va dritta da 0 a "
+        "100%, senza più ripartire da capo, e mostra la percentuale così sai "
+        "sempre quanto manca.",
+        "Nel Mixer, se provi ad accendere il metronomo o la griglia dei beat "
+        "prima di aver analizzato il brano, Sonora ti spiega cosa fare invece "
+        "di ignorare il clic.",
+    ]),
     ("1.7.1", [
         "Risolto un errore che a volte chiudeva Sonora all'improvviso "
         "durante la ricerca dei testi.",

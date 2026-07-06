@@ -1814,6 +1814,7 @@ class MainWindow(QWidget):
             label, detail = "stem", "separazione…"
             title = (self._stem_row.item.title or "") if self._stem_row else ""
             self._stem_task = ("Separazione stem · " + title).rstrip(" ·")
+        self._stem_detail = detail
         # chip attività globale sulla playbar (visibile da ogni schermata)
         self.playbar.task_update(self._stem_task, None, cancellable=True)
         if self._stem_row:
@@ -1824,7 +1825,8 @@ class MainWindow(QWidget):
         self.playbar.task_update(task, pct, cancellable=True)
         if self._stem_row:
             status = self._stem_row.item.status or "stem"
-            self._stem_row.update_progress(pct, status, "")
+            detail = getattr(self, "_stem_detail", "separazione…")
+            self._stem_row.update_progress(pct, status, f"{detail} {pct:.0f}%")
 
     def _on_stem_finished(self, ok: bool, result: str) -> None:
         if self._stem_row:

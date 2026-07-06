@@ -249,7 +249,10 @@ class LyricsTab(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.current_folder = ""
-        self._worker: LyricsWorker | None = None
+        # Worker vivi: un QThread perde l'ultimo riferimento Python mentre gira
+        # → Qt lo distrugge a thread attivo e abortisce il processo. Ogni worker
+        # resta qui dentro finché il suo thread non è davvero terminato.
+        self._workers: list[LyricsWorker] = []
         self._req_id = 0
         self._is_editing = False
         self._duration = 0.0        # durata del brano corrente (s), per il match
@@ -352,6 +355,35 @@ class LyricsTab(QWidget):
 
         self.splitter.setSizes([600, 220])
 
+    # ---------------- gestione worker ----------------
+
+    def _launch(self, worker: LyricsWorker) -> None:
+        """Avvia il worker tenendolo vivo finché il thread non termina.
+
+        Le risposte fuori tempo massimo vengono già scartate dai controlli
+        su `_req_id`: qui serve solo che l'oggetto non venga distrutto
+        a thread in corsa."""
+        self._workers.append(worker)
+        worker.finished.connect(lambda: self._reap(worker))
+        worker.start()
+
+    def _reap(self, worker: LyricsWorker) -> None:
+        if worker in self._workers:
+            self._workers.remove(worker)
+        worker.deleteLater()
+
+    def shutdown(self) -> None:
+        """Attende i worker di ricerca ancora attivi (chiamare alla chiusura).
+
+        urlopen ha timeout 10s per chiamata: dopo un'attesa ragionevole i
+        thread rimasti vengono terminati a forza — stiamo comunque uscendo,
+        e distruggerli ancora in corsa abortirebbe il processo."""
+        for worker in self._workers:
+            if worker.isRunning() and not worker.wait(3000):
+                worker.terminate()
+                worker.wait(1000)
+        self._workers.clear()
+
     # ---------------- caricamento dal Mixer ----------------
 
     def load_song_lyrics(self, folder: str, duration: float = 0.0) -> None:
@@ -414,11 +446,11 @@ class LyricsTab(QWidget):
         self._current_name = song_name
         self._req_id += 1
         req_id = self._req_id
-        self._worker = LyricsWorker(artist=artist, track=track, query=song_name,
-                                    duration=self._duration)
-        self._worker.done.connect(
+        worker = LyricsWorker(artist=artist, track=track, query=song_name,
+                              duration=self._duration)
+        worker.done.connect(
             lambda ok, result, data: self._on_auto_download_done(req_id, ok, result))
-        self._worker.start()
+        self._launch(worker)
 
     def _on_auto_download_done(self, req_id: int, success: bool, result: str) -> None:
         if req_id != self._req_id:
@@ -488,11 +520,11 @@ class LyricsTab(QWidget):
 
         self._req_id += 1
         req_id = self._req_id
-        self._worker = LyricsWorker(artist=artist, track=track, query=query,
-                                    duration=self._duration, search_only=True)
-        self._worker.done.connect(
+        worker = LyricsWorker(artist=artist, track=track, query=query,
+                              duration=self._duration, search_only=True)
+        worker.done.connect(
             lambda ok, result, data: self._on_search_done(req_id, ok, data))
-        self._worker.start()
+        self._launch(worker)
 
     def _on_search_done(self, req_id: int, success: bool, data: list) -> None:
         if req_id != self._req_id:

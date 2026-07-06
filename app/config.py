@@ -28,6 +28,8 @@ DEFAULTS: dict[str, Any] = {
     "update_repo": "RobyPisco/sonora",  # "owner/repo" GitHub per gli aggiornamenti dell'app
     "auto_check_updates": True,          # controlla aggiornamenti all'avvio
     "chord_notation": "latin",   # latin (Do Re Mi) | anglo (C D E)
+    "ui_scale": 1.0,             # fattore ingrandimento UI (1.0/1.15/1.3/1.5), applicato all'avvio
+    "last_seen_version": "",     # ultima versione di cui l'utente ha visto le «Novità»
 }
 
 

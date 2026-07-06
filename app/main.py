@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from . import logging_setup, paths, updater
+from . import config, logging_setup, paths, updater
 
 # Applica l'eventuale yt-dlp aggiornato PRIMA di importare moduli che usano yt_dlp.
 updater.apply_override()
 
 
+def _apply_ui_scale() -> None:
+    """Ingrandimento UI opzionale (Impostazioni → Aspetto).
+
+    QT_SCALE_FACTOR va impostato PRIMA di creare QApplication; si moltiplica
+    con la scala DPI di Windows, quindi 1.0 = comportamento di sempre."""
+    try:
+        scale = float(config.load().get("ui_scale") or 1.0)
+    except (TypeError, ValueError):
+        scale = 1.0
+    if scale > 1.01 and "QT_SCALE_FACTOR" not in os.environ:
+        os.environ["QT_SCALE_FACTOR"] = f"{scale:g}"
+
+
 def main() -> int:
     logging_setup.setup()   # logging su file + excepthook, prima di tutto il resto
+    _apply_ui_scale()
     app = QApplication(sys.argv)
     app.setApplicationName("Sonora")
 

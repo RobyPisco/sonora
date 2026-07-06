@@ -12,6 +12,17 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.7.1", [
+        "Risolto un errore che a volte chiudeva Sonora all'improvviso "
+        "durante la ricerca dei testi.",
+        "Nuova opzione «Dimensione interfaccia» (Impostazioni → Aspetto) "
+        "per ingrandire testi e pulsanti: comoda sugli schermi grandi. "
+        "Ha effetto al riavvio dell'app.",
+        "Pagina Scarica più ariosa: quando la coda è vuota, al posto del "
+        "grande riquadro scuro c'è solo un invito discreto.",
+        "Risolto: questa finestra «Novità» non compariva mai dopo un "
+        "aggiornamento. Dal prossimo aggiornamento apparirà da sola.",
+    ]),
     ("1.7.0", [
         "La barra del player in basso ora compare solo dove serve: sempre "
         "nei Testi, altrove solo mentre gira un'operazione lunga (con il "

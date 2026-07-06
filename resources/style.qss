@@ -89,6 +89,15 @@ QFrame#Card {
     border: 1px solid @tok(border);
     border-radius: @tok(r_lg);
 }
+
+/* Placeholder coda vuota (pagina Scarica) */
+QLabel#QueueEmpty {
+    color: @tok(faint);
+    background: transparent;
+    border: 1px dashed @tok(border2);
+    border-radius: @tok(r_lg);
+    font-size: @tok(fs_base);
+}
 QFrame#StatCard {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @tok(panel2), stop:1 @tok(panel));
     border: 1px solid @tok(border);

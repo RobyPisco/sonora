@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -24,6 +25,14 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, changelog
+
+# Fattori di ingrandimento UI selezionabili (label, valore per QT_SCALE_FACTOR)
+UI_SCALES: list[tuple[str, float]] = [
+    ("Normale (100%)", 1.0),
+    ("Grande (115%)", 1.15),
+    ("Più grande (130%)", 1.3),
+    ("Massima (150%)", 1.5),
+]
 
 
 def _card() -> tuple[QFrame, QVBoxLayout]:
@@ -66,7 +75,7 @@ def _switch() -> QCheckBox:
 class SettingsPage(QWidget):
     """main = MainWindow: fornisce cfg, handler motore/update/licenza."""
 
-    SECTIONS = ["Download", "Motore stem", "Aggiornamenti", "Licenza"]
+    SECTIONS = ["Download", "Aspetto", "Motore stem", "Aggiornamenti", "Licenza"]
 
     def __init__(self, main):
         super().__init__()
@@ -111,6 +120,7 @@ class SettingsPage(QWidget):
         root.addStretch(1)
 
         self.stack.addWidget(self._page_download())
+        self.stack.addWidget(self._page_appearance())
         self.stack.addWidget(self._page_engine())
         self.stack.addWidget(self._page_updates())
         self.stack.addWidget(self._page_license())
@@ -129,6 +139,23 @@ class SettingsPage(QWidget):
         lay.addWidget(_row("Avvisa a fine coda",
                            "Notifica di sistema e suono quando i download finiscono.",
                            self.notify_chk))
+        lay.addStretch(1)
+        return card
+
+    def _page_appearance(self) -> QWidget:
+        card, lay = _card()
+        self.scale_combo = QComboBox()
+        for label, _v in UI_SCALES:
+            self.scale_combo.addItem(label)
+        self.scale_combo.setMinimumHeight(38)
+        self.scale_combo.setMinimumWidth(190)
+        lay.addWidget(_row("Dimensione interfaccia",
+                           "Ingrandisce testi, pulsanti e controlli: utile su "
+                           "schermi grandi o ad alta risoluzione.",
+                           self.scale_combo))
+        hint = QLabel("La modifica ha effetto al prossimo avvio di Sonora.")
+        hint.setProperty("class", "Hint")
+        lay.addWidget(hint)
         lay.addStretch(1)
         return card
 

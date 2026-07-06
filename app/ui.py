@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 from . import __version__, app_update, changelog, config, history, icons, paths, stems, theme, updater
 from .toast import Banner, toast
 from .ui_playbar import PlayBar
-from .ui_settings import SettingsPage
+from .ui_settings import UI_SCALES, SettingsPage
 from .ui_shell import NavRail
 from .downloader import (
     AUDIO_FORMATS,
@@ -607,6 +607,8 @@ class MainWindow(QWidget):
         self.engine_btn = self.settings_page.engine_btn
         self.ytdlp_lbl = self.settings_page.ytdlp_lbl
         self.update_btn = self.settings_page.update_btn
+        self.scale_combo = self.settings_page.scale_combo
+        self.scale_combo.currentIndexChanged.connect(self._on_ui_scale_changed)
 
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
 
@@ -924,7 +926,20 @@ class MainWindow(QWidget):
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
         q_lay.addWidget(self.list_widget, 1)
+        # A coda vuota la lista sparisce: al suo posto un invito compatto,
+        # e lo spazio verticale resta libero invece di un riquadro deserto.
+        self.queue_empty = QLabel(
+            "La coda è vuota — cerca un brano o incolla un link qui sopra.")
+        self.queue_empty.setObjectName("QueueEmpty")
+        self.queue_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.queue_empty.setFixedHeight(120)
+        q_lay.addWidget(self.queue_empty)
+        self.queue_spacer = QWidget()   # assorbe lo spazio quando la coda è vuota
+        self.queue_spacer.setSizePolicy(QSizePolicy.Policy.Preferred,
+                                        QSizePolicy.Policy.Expanding)
+        q_lay.addWidget(self.queue_spacer, 1)
         root.addWidget(self.queue_block, 1)
+        self._refresh_queue_empty()
 
         # --- log: disclosure in fondo, chiusa di default ---
         self.log_toggle = QToolButton()
@@ -1085,6 +1100,14 @@ class MainWindow(QWidget):
         self.norm_chk.setChecked(bool(self.cfg.get("normalize", False)))
         self.watch_chk.setChecked(bool(self.cfg.get("clipboard_watch", False)))
         self.notify_chk.setChecked(bool(self.cfg.get("notify_end", True)))
+        try:
+            scale = float(self.cfg.get("ui_scale") or 1.0)
+        except (TypeError, ValueError):
+            scale = 1.0
+        idx = min(range(len(UI_SCALES)), key=lambda i: abs(UI_SCALES[i][1] - scale))
+        self.scale_combo.blockSignals(True)   # niente toast «salvata» all'avvio
+        self.scale_combo.setCurrentIndex(idx)
+        self.scale_combo.blockSignals(False)
         sm = self.cfg.get("stem_mode", "6")
         sm_idx = next((i for i, (_l, v) in enumerate(STEM_MODES) if v == sm), 0)
         self.stem_mode_combo.setCurrentIndex(sm_idx)
@@ -1133,6 +1156,18 @@ class MainWindow(QWidget):
         config.save(self.cfg)
 
     # ---------- handler UI ----------
+
+    def _refresh_queue_empty(self) -> None:
+        """Coda vuota → placeholder compatto al posto della lista."""
+        empty = not self.queue
+        self.list_widget.setVisible(not empty)
+        self.queue_empty.setVisible(empty)
+        self.queue_spacer.setVisible(empty)
+
+    def _on_ui_scale_changed(self, idx: int) -> None:
+        self.cfg["ui_scale"] = UI_SCALES[idx][1]
+        config.save(self.cfg)
+        toast(self, "Dimensione salvata: ha effetto al prossimo avvio di Sonora.", "info")
 
     def _on_format_changed(self, fmt: str) -> None:
         from .downloader import LOSSLESS_FORMATS, NO_TAG_FORMATS
@@ -1307,6 +1342,7 @@ class MainWindow(QWidget):
         lw_item.setSizeHint(row.sizeHint())
         self.list_widget.addItem(lw_item)
         self.list_widget.setItemWidget(lw_item, row)
+        self._refresh_queue_empty()
         # anteprima async (titolo/durata/miniatura) solo per URL veri
         if fetch and url:
             run_info_task(InfoTask(item, self._info_signals))
@@ -1324,6 +1360,7 @@ class MainWindow(QWidget):
         lw_item.setSizeHint(row.sizeHint())
         self.list_widget.addItem(lw_item)
         self.list_widget.setItemWidget(lw_item, row)
+        self._refresh_queue_empty()
         return item
 
     def _on_info_done(self, item, ok: bool, title: str, duration: str, thumb: bytes) -> None:
@@ -1339,6 +1376,7 @@ class MainWindow(QWidget):
         self.queue.clear()
         self.rows.clear()
         self.list_widget.clear()
+        self._refresh_queue_empty()
 
     def _on_open_folder(self) -> None:
         d = self.dest_edit.text().strip()
@@ -1645,6 +1683,7 @@ class MainWindow(QWidget):
         self.queue.pop(idx)
         self.rows.pop(idx)
         self.list_widget.takeItem(idx)
+        self._refresh_queue_empty()
 
     def _on_show_history(self) -> None:
         HistoryDialog(self).exec()
@@ -2136,6 +2175,10 @@ class MainWindow(QWidget):
             self._stem_thread.wait(5000)
         try:
             self.mixer_tab.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.lyrics_tab.shutdown()
         except Exception:  # noqa: BLE001
             pass
         self._stop_preview()

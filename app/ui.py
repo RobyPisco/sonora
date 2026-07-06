@@ -911,12 +911,18 @@ class MainWindow(QWidget):
         self.retry_btn = QPushButton("Riprova falliti")
         self.retry_btn.setObjectName("Ghost")
         self.retry_btn.clicked.connect(self._on_retry_failed)
+        self.clear_done_btn = QPushButton("Rimuovi completati")
+        self.clear_done_btn.setObjectName("Ghost")
+        self.clear_done_btn.setToolTip(
+            "Toglie dalla coda i brani completati (restano in Cronologia).")
+        self.clear_done_btn.clicked.connect(self._on_clear_done)
         self.clear_btn = QPushButton("Svuota")
         self.clear_btn.setObjectName("Ghost")
         self.clear_btn.clicked.connect(self._on_clear)
         queue_head.addWidget(self.stem_all_btn)
         queue_head.addWidget(self.history_btn)
         queue_head.addWidget(self.retry_btn)
+        queue_head.addWidget(self.clear_done_btn)
         queue_head.addWidget(self.clear_btn)
         q_lay.addLayout(queue_head)
 
@@ -1378,6 +1384,21 @@ class MainWindow(QWidget):
         self.list_widget.clear()
         self._refresh_queue_empty()
 
+    def _on_clear_done(self) -> None:
+        """Toglie dalla coda i brani completati (già registrati in Cronologia)."""
+        if self._busy():
+            return
+        done = sum(1 for it in self.queue if it.status == "fatto")
+        if not done:
+            toast(self, "Nessun brano completato da rimuovere.", "info")
+            return
+        for idx in range(len(self.queue) - 1, -1, -1):
+            if self.queue[idx].status == "fatto":
+                self.queue.pop(idx)
+                self.rows.pop(idx)
+                self.list_widget.takeItem(idx)
+        self._refresh_queue_empty()
+
     def _on_open_folder(self) -> None:
         d = self.dest_edit.text().strip()
         if d and os.path.isdir(d):
@@ -1718,7 +1739,10 @@ class MainWindow(QWidget):
         self._start_stem_batch([item])
 
     def _on_separate_all(self) -> None:
-        """Separa in stem solo i brani non ancora separati (salta quelli già fatti)."""
+        """Separa in stem solo i brani non ancora separati (salta quelli già fatti).
+
+        Mai rielaborare i completati: per rifarne uno c'è il tasto destro sul
+        brano («Separa in stem»), che sovrascrive senza chiedere."""
         ready = [it for it in self.queue
                  if it.extra.get("filepath") and os.path.exists(it.extra["filepath"])]
         if not ready:
@@ -1728,13 +1752,12 @@ class MainWindow(QWidget):
                  if not (it.extra.get("stems_dir")
                          or stems.already_separated(it.extra["filepath"]))]
         if not items:
-            r = QMessageBox.question(
-                self, "Già separati",
-                "Tutti i brani in coda risultano già separati.\n\n"
-                "Vuoi separarli di nuovo (sovrascrive)?")
-            if r != QMessageBox.StandardButton.Yes:
-                return
-            items = ready
+            toast(self, "Tutti i brani in coda risultano già separati. "
+                        "Per rifarne uno usa il tasto destro sul brano.", "ok")
+            return
+        skipped = len(ready) - len(items)
+        if skipped:
+            self._log(f"— {skipped} già separati, li salto —")
         self._start_stem_batch(items)
 
     def _start_stem_batch(self, items: list[QueueItem]) -> None:
@@ -1793,6 +1816,7 @@ class MainWindow(QWidget):
         for b in (sp.engine_btn, sp.verify_btn, sp.uninstall_btn, sp.location_btn):
             b.setEnabled(not running)
         self.clear_btn.setEnabled(not running)
+        self.clear_done_btn.setEnabled(not running)
         self.retry_btn.setEnabled(not running)
         tip = "Operazione in corso…" if running else ""
         for b in (self.stem_all_btn, self.stem_file_btn):
@@ -2039,10 +2063,12 @@ class MainWindow(QWidget):
         if not self.queue:
             toast(self, "Aggiungi almeno un link alla coda.", "info")
             return
-        # riprocessa solo gli item non ancora completati
-        pending = [it for it in self.queue if it.status != "fatto"]
+        # riprocessa solo gli item non ancora completati; i file locali (senza
+        # url, aggiunti per la separazione) non sono scaricabili: fuori anche loro
+        pending = [it for it in self.queue if it.status != "fatto" and it.url]
         if not pending:
-            toast(self, "Tutti gli elementi sono già completati. ✓", "ok")
+            toast(self, "Niente da scaricare: gli elementi in coda sono già "
+                        "completati o file locali. ✓", "ok")
             return
         self._start_download(pending)
 
@@ -2113,6 +2139,7 @@ class MainWindow(QWidget):
         self.stop_btn.setEnabled(running)
         self.stop_btn.setText("Stop")
         self.clear_btn.setEnabled(not running)
+        self.clear_done_btn.setEnabled(not running)
         self.retry_btn.setEnabled(not running)
         for w in (self.fmt_combo, self.br_combo, self.tpl_combo, self.url_edit,
                   self.norm_chk, self.folder_chk, self.meta_chk, self.thumb_chk):

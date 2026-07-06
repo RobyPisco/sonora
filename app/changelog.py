@@ -12,6 +12,15 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.7.3", [
+        "«Separa tutti» non chiede più di rifare i brani già separati: "
+        "lavora solo sui nuovi e salta gli altri. Per rifarne uno c'è il "
+        "tasto destro sul brano → «Separa in stem».",
+        "Nuovo pulsante «Rimuovi completati» sopra la coda: toglie i brani "
+        "finiti, che restano comunque in Cronologia.",
+        "Premendo «Scarica», i file locali aggiunti solo per la separazione "
+        "non vengono più mandati per sbaglio al download.",
+    ]),
     ("1.7.2", [
         "La barra di avanzamento della separazione stem ora va dritta da 0 a "
         "100%, senza più ripartire da capo, e mostra la percentuale così sai "

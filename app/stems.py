@@ -939,6 +939,8 @@ def analyze(folder: str, log_cb: LogCb, cancel: Cancel | None = None) -> dict:
                 continue
     if not isinstance(data, dict):
         raise RuntimeError("analisi: output non valido")
+    if data.get("error"):
+        raise RuntimeError(str(data["error"]))
     try:
         (Path(folder) / "analysis.json").write_text(
             json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

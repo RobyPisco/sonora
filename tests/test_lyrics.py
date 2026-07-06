@@ -1,6 +1,6 @@
 """Test del parser LRC e della scelta risultati LRCLIB (modalità karaoke)."""
 
-from app.ui_lyrics import parse_lrc, pick_best_lyrics
+from app.ui_lyrics import build_lrclib_url, parse_lrc, pick_best_lyrics, split_artist_track
 
 
 def test_parse_lrc_basic():
@@ -84,3 +84,34 @@ def test_pick_best_scarta_risultati_vuoti():
     assert pick_best_lyrics(data, 200)["trackName"] == "pieno"
     assert pick_best_lyrics([_item("vuoto", plain="")], 200) is None
     assert pick_best_lyrics([], 200) is None
+
+
+def test_build_lrclib_url_con_artista_e_titolo():
+    url = build_lrclib_url("", artist="Queen", track="Bohemian Rhapsody")
+    assert "artist_name=Queen" in url
+    assert "track_name=Bohemian" in url
+    assert "q=" not in url
+
+
+def test_build_lrclib_url_con_duration():
+    url = build_lrclib_url("", artist="Queen", track="Bohemian Rhapsody", duration=354.6)
+    assert "duration=355" in url
+
+
+def test_build_lrclib_url_solo_titolo_ripiega_su_q():
+    url = build_lrclib_url("", artist="", track="Bohemian Rhapsody")
+    assert "q=Bohemian" in url
+    assert "artist_name" not in url
+
+
+def test_build_lrclib_url_query_libera():
+    url = build_lrclib_url("Queen Bohemian Rhapsody")
+    assert "q=Queen" in url
+
+
+def test_split_artist_track_con_trattino():
+    assert split_artist_track("Queen - Bohemian Rhapsody") == ("Queen", "Bohemian Rhapsody")
+
+
+def test_split_artist_track_senza_trattino():
+    assert split_artist_track("Bohemian Rhapsody") == ("", "Bohemian Rhapsody")

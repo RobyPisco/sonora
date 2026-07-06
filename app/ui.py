@@ -48,13 +48,17 @@ from .downloader import (
     DownloadWorker,
     InfoSignals,
     InfoTask,
+    PreviewSignals,
+    PreviewTask,
     QueueItem,
     SearchSignals,
     SearchTask,
     make_thread,
     run_info_task,
+    run_preview_task,
     run_search_task,
 )
+from .preview_player import PreviewPlayer
 from .ui_mixer import MixerTab
 from .ui_lyrics import LyricsTab
 
@@ -449,6 +453,14 @@ class MainWindow(QWidget):
         self._search_signals.done.connect(self._on_search_done)
         self._search_query = ""
 
+        # anteprima audio (estratto breve) sui risultati di ricerca
+        self._preview_signals = PreviewSignals()
+        self._preview_signals.done.connect(self._on_preview_ready)
+        self._preview_player = PreviewPlayer()
+        self._preview_url = ""    # url dell'anteprima corrente (caricamento o riproduzione)
+        self._preview_path = ""   # file temp corrente, per pulizia
+        self._preview_title = ""
+
         self.setAcceptDrops(True)   # drag & drop link
 
         # stato sessione download (per notifica a fine)
@@ -671,6 +683,15 @@ class MainWindow(QWidget):
         search_head = QHBoxLayout()
         self.search_label = QLabel("Risultati ricerca")
         self.search_label.setObjectName("Subtitle")
+        self.preview_lbl = QLabel("")
+        self.preview_lbl.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:12px;")
+        self.preview_lbl.hide()
+        self.preview_btn = QPushButton()
+        self.preview_btn.setObjectName("GhostMini")
+        self.preview_btn.setFixedSize(30, 30)
+        self.preview_btn.setToolTip("Ferma anteprima")
+        self.preview_btn.clicked.connect(self._stop_preview)
+        self.preview_btn.hide()
         search_close = QPushButton()
         search_close.setObjectName("GhostMini")
         search_close.setIcon(icons.icon("x", theme.COLORS["muted"], 12))
@@ -678,10 +699,13 @@ class MainWindow(QWidget):
         search_close.setToolTip("Chiudi i risultati")
         search_close.clicked.connect(self._close_search)
         search_head.addWidget(self.search_label, 1)
+        search_head.addWidget(self.preview_lbl, 0)
+        search_head.addWidget(self.preview_btn, 0)
         search_head.addWidget(search_close, 0)
         sp.addLayout(search_head)
         self.search_list = QListWidget()
         self.search_list.setMaximumHeight(230)
+        self.search_list.itemClicked.connect(self._on_search_preview)
         self.search_list.itemActivated.connect(self._on_search_pick)
         self.search_list.itemDoubleClicked.connect(self._on_search_pick)
         sp.addWidget(self.search_list)
@@ -1087,6 +1111,7 @@ class MainWindow(QWidget):
     # ---------- ricerca video ----------
 
     def _start_search(self, query: str) -> None:
+        self._stop_preview()
         self._search_query = query
         self.search_panel.show()
         self.search_label.setText(f"Ricerca di “{query}”…")
@@ -1128,6 +1153,7 @@ class MainWindow(QWidget):
         url = item.data(Qt.ItemDataRole.UserRole)
         if not url:
             return
+        self._stop_preview()
         added = self._add_item(url)
         if added is not None:
             self._log(f"+ {item.text().split('  ·  ')[0]}")
@@ -1135,9 +1161,68 @@ class MainWindow(QWidget):
         item.setText("✓ " + item.text().lstrip("✓ "))
 
     def _close_search(self) -> None:
+        self._stop_preview()
         self._search_query = ""
         self.search_list.clear()
         self.search_panel.hide()
+
+    # ---------- anteprima audio risultati ricerca ----------
+
+    def _on_search_preview(self, item: QListWidgetItem) -> None:
+        url = item.data(Qt.ItemDataRole.UserRole)
+        if not url:
+            return
+        if self._preview_url == url and self._preview_player.is_playing():
+            self._stop_preview()
+            return
+        self._stop_preview()
+        self._preview_url = url
+        self._preview_title = item.text().split("  ·  ")[0].lstrip("✓ ")
+        self.preview_lbl.setText(f"Caricamento anteprima: {self._preview_title}…")
+        self.preview_lbl.show()
+        self.preview_btn.setIcon(icons.icon("clock", theme.COLORS["muted"], 14))
+        self.preview_btn.show()
+        run_preview_task(PreviewTask(url, self._preview_signals))
+
+    def _on_preview_ready(self, url: str, ok: bool, path_or_err: str) -> None:
+        if url != self._preview_url:
+            # anteprima superata da una più recente/chiusa: scarta il file scaricato
+            if ok and path_or_err:
+                try:
+                    os.remove(path_or_err)
+                except OSError:
+                    pass
+            return
+        if not ok:
+            self.preview_lbl.hide()
+            self.preview_btn.hide()
+            self._preview_url = ""
+            toast(self, f"Anteprima non disponibile: {path_or_err}", "warn")
+            return
+        try:
+            self._preview_player.load(path_or_err)
+            self._preview_player.play()
+        except Exception as e:  # noqa: BLE001
+            self.preview_lbl.hide()
+            self.preview_btn.hide()
+            self._preview_url = ""
+            toast(self, f"Errore riproduzione anteprima: {e}", "error")
+            return
+        self._preview_path = path_or_err
+        self.preview_lbl.setText(f"▶ {self._preview_title}")
+        self.preview_btn.setIcon(icons.icon("x", theme.COLORS["muted"], 12))
+
+    def _stop_preview(self) -> None:
+        self._preview_player.stop()
+        if self._preview_path:
+            try:
+                os.remove(self._preview_path)
+            except OSError:
+                pass
+        self._preview_path = ""
+        self._preview_url = ""
+        self.preview_lbl.hide()
+        self.preview_btn.hide()
 
     def _on_load_file(self) -> None:
         """Aggiunge alla coda uno o più file audio locali già scaricati."""
@@ -1997,6 +2082,7 @@ class MainWindow(QWidget):
             self.mixer_tab.shutdown()
         except Exception:  # noqa: BLE001
             pass
+        self._stop_preview()
         if self._upd_thread and self._upd_thread.isRunning():
             self._upd_thread.quit()
             self._upd_thread.wait(3000)

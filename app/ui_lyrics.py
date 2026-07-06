@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import urllib.parse
 import urllib.request
 from bisect import bisect_right
@@ -28,6 +29,7 @@ from PySide6.QtGui import (
     QTextCursor,
 )
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -67,6 +69,31 @@ def parse_lrc(text: str) -> list[tuple[float, str]]:
     return out
 
 
+def build_lrclib_url(query: str, artist: str = "", track: str = "", duration: float = 0.0) -> str:
+    """Costruisce l'URL di ricerca LRCLIB.
+
+    Con `artist` e `track` entrambi presenti usa i parametri strutturati
+    (`artist_name`/`track_name`, più precisi di una query libera); altrimenti
+    ripiega sul generico `q=query`."""
+    base = "https://lrclib.net/api/search?"
+    if artist and track:
+        params = {"artist_name": artist, "track_name": track}
+        if duration > 0:
+            params["duration"] = str(int(round(duration)))
+        return base + urllib.parse.urlencode(params)
+    return base + urllib.parse.urlencode({"q": query or track or artist})
+
+
+def split_artist_track(name: str) -> tuple[str, str]:
+    """Splitta un nome tipo 'Artista - Titolo' in (artista, titolo).
+
+    Se non c'è ' - ' ritorna ("", name) — solo titolo, nessun artista noto."""
+    if " - " in name:
+        artist, track = name.split(" - ", 1)
+        return artist.strip(), track.strip()
+    return "", name.strip()
+
+
 def pick_best_lyrics(data: list, duration: float = 0.0) -> dict | None:
     """Sceglie il risultato LRCLIB migliore per il brano.
 
@@ -98,14 +125,17 @@ class LyricsWorker(QThread):
     # success, plain_text_or_error, synced_lrc (può essere ""), search_results
     done = Signal(bool, str, str, list)
 
-    def __init__(self, query: str, search_only: bool = False, duration: float = 0.0):
+    def __init__(self, query: str, search_only: bool = False, duration: float = 0.0,
+                 artist: str = "", track: str = ""):
         super().__init__()
         self.query = query
         self.search_only = search_only
         self.duration = duration   # durata del brano nel mixer (s), 0 = ignota
+        self.artist = artist
+        self.track = track
 
     def run(self) -> None:
-        url = "https://lrclib.net/api/search?" + urllib.parse.urlencode({"q": self.query})
+        url = build_lrclib_url(self.query, self.artist, self.track, self.duration)
         headers = {"User-Agent": "SonoraLyricsFinder/1.0 (https://github.com/RobyPisco/sonora)"}
         req = urllib.request.Request(url, headers=headers)
         try:
@@ -139,6 +169,7 @@ class LyricsTab(QWidget):
         super().__init__(parent)
         self.current_folder = ""
         self._worker: LyricsWorker | None = None
+        self._req_id = 0
         self._search_results: list = []
         self._is_editing = False
         self._duration = 0.0   # durata del brano corrente (s), per il match LRCLIB
@@ -153,13 +184,18 @@ class LyricsTab(QWidget):
         root.setContentsMargins(18, 16, 18, 14)
         root.setSpacing(12)
 
-        # Barra superiore: Ricerca manuale e Modifica
+        # Barra superiore: Ricerca manuale (artista/titolo) e Modifica/Esporta
         top = QHBoxLayout()
         top.setSpacing(8)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Cerca testo manualmente (es. Queen Bohemian Rhapsody)…")
-        self.search_edit.returnPressed.connect(self._on_search)
-        self.search_edit.setMinimumHeight(38)
+        self.artist_edit = QLineEdit()
+        self.artist_edit.setPlaceholderText("Artista (opzionale)")
+        self.artist_edit.returnPressed.connect(self._on_search)
+        self.artist_edit.setMinimumHeight(38)
+
+        self.track_edit = QLineEdit()
+        self.track_edit.setPlaceholderText("Titolo (es. Bohemian Rhapsody)…")
+        self.track_edit.returnPressed.connect(self._on_search)
+        self.track_edit.setMinimumHeight(38)
 
         self.search_btn = QPushButton("Cerca")
         self.search_btn.setObjectName("Ghost")
@@ -173,9 +209,17 @@ class LyricsTab(QWidget):
         self.edit_btn.clicked.connect(self._toggle_edit)
         self.edit_btn.setEnabled(False)
 
-        top.addWidget(self.search_edit, 1)
+        self.export_btn = QPushButton("Esporta…")
+        self.export_btn.setObjectName("Ghost")
+        self.export_btn.setMinimumHeight(38)
+        self.export_btn.clicked.connect(self._on_export)
+        self.export_btn.setEnabled(False)
+
+        top.addWidget(self.artist_edit, 1)
+        top.addWidget(self.track_edit, 1)
         top.addWidget(self.search_btn)
         top.addWidget(self.edit_btn)
+        top.addWidget(self.export_btn)
         root.addLayout(top)
 
         # Barra di stato
@@ -226,9 +270,11 @@ class LyricsTab(QWidget):
             self.text_edit.clear()
             self.status_lbl.setText("Carica un brano nel Mixer per vedere il testo.")
             self.edit_btn.setEnabled(False)
+            self.export_btn.setEnabled(False)
             return
 
         self.edit_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)
         lrc_path = Path(folder) / "lyrics.lrc"
         lyrics_path = Path(folder) / "lyrics.txt"
 
@@ -258,6 +304,7 @@ class LyricsTab(QWidget):
             song_name = song_name[:-8]
         elif song_name.lower().endswith("-stems"):
             song_name = song_name[:-6]
+        artist, track = split_artist_track(song_name)
 
         self.status_lbl.setText(f"Ricerca automatica testo per '{song_name}' su LRCLIB...")
         self.text_edit.setHtml(
@@ -265,15 +312,19 @@ class LyricsTab(QWidget):
             "Ricerca automatica del testo in corso...</div>"
         )
 
-        if self._worker and self._worker.isRunning():
-            self._worker.terminate()
-            self._worker.wait()
-
-        self._worker = LyricsWorker(song_name, search_only=False, duration=self._duration)
-        self._worker.done.connect(self._on_auto_download_done)
+        self._req_id += 1
+        req_id = self._req_id
+        self._worker = LyricsWorker(song_name, search_only=False, duration=self._duration,
+                                     artist=artist, track=track)
+        self._worker.done.connect(
+            lambda ok, result, synced, data: self._on_auto_download_done(
+                req_id, ok, result, synced, data))
         self._worker.start()
 
-    def _on_auto_download_done(self, success: bool, result: str, synced: str, _data: list) -> None:
+    def _on_auto_download_done(self, req_id: int, success: bool, result: str, synced: str,
+                                _data: list) -> None:
+        if req_id != self._req_id:
+            return   # ricerca superata da una più recente, ignora
         if success and self.current_folder:
             # Salva locale (testo statico sempre, LRC se disponibile)
             try:
@@ -282,8 +333,8 @@ class LyricsTab(QWidget):
                 if synced:
                     (Path(self.current_folder) / "lyrics.lrc").write_text(
                         synced, encoding="utf-8")
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                toast(self, f"Testo scaricato ma non salvato: {e}", "warn")
             lines = parse_lrc(synced) if synced else []
             if lines:
                 self._display_synced(lines)
@@ -421,23 +472,27 @@ class LyricsTab(QWidget):
         sb.setValue(max(0, min(target, sb.maximum())))
 
     def _on_search(self) -> None:
-        query = self.search_edit.text().strip()
-        if not query:
+        artist = self.artist_edit.text().strip()
+        track = self.track_edit.text().strip()
+        if not track and not artist:
             return
+        query = f"{artist} {track}".strip()
 
         self.status_lbl.setText(f"Ricerca manuale per '{query}'...")
         self.results_list.clear()
         self.results_list.show()
 
-        if self._worker and self._worker.isRunning():
-            self._worker.terminate()
-            self._worker.wait()
-
-        self._worker = LyricsWorker(query, search_only=True)
-        self._worker.done.connect(self._on_search_done)
+        self._req_id += 1
+        req_id = self._req_id
+        self._worker = LyricsWorker(query, search_only=True, artist=artist, track=track)
+        self._worker.done.connect(
+            lambda ok, result, synced, data: self._on_search_done(req_id, ok, result, synced, data))
         self._worker.start()
 
-    def _on_search_done(self, success: bool, _result: str, _synced: str, data: list) -> None:
+    def _on_search_done(self, req_id: int, success: bool, _result: str, _synced: str,
+                         data: list) -> None:
+        if req_id != self._req_id:
+            return   # ricerca superata da una più recente, ignora
         self.results_list.clear()
         if success and data:
             self._search_results = data
@@ -517,8 +572,8 @@ class LyricsTab(QWidget):
             if src.exists():
                 try:
                     self.text_edit.setPlainText(src.read_text(encoding="utf-8"))
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    toast(self, f"Impossibile leggere il file da modificare: {e}", "warn")
             hint = " (formato LRC, [mm:ss.xx] riga)" if edit_lrc else ""
             self.status_lbl.setText(
                 f"Modalità modifica{hint}: effettua le modifiche e premi 'Salva'.")
@@ -546,3 +601,31 @@ class LyricsTab(QWidget):
                     self._display_lyrics(text)
             else:
                 self._display_lyrics(text)
+
+    def _on_export(self) -> None:
+        """Esporta il testo corrente in un file scelto dall'utente.
+
+        Se esiste già una copia locale (`lyrics.lrc`/`lyrics.txt` nella cartella
+        del brano) la copia così com'è (preserva i timestamp); altrimenti
+        scrive il testo attualmente mostrato."""
+        synced = self._synced_active
+        ext = "lrc" if synced else "txt"
+        filt = ("Testo LRC sincronizzato (*.lrc)" if synced
+                else "Testo semplice (*.txt)")
+        default_name = "testo"
+        if self.current_folder:
+            default_name = os.path.basename(self.current_folder.rstrip("/\\"))
+        path, _sel = QFileDialog.getSaveFileName(
+            self, "Esporta testo", f"{default_name}.{ext}", filt)
+        if not path:
+            return
+
+        src = Path(self.current_folder) / f"lyrics.{ext}" if self.current_folder else None
+        try:
+            if src and src.exists():
+                shutil.copy(src, path)
+            else:
+                Path(path).write_text(self.text_edit.toPlainText(), encoding="utf-8")
+            toast(self, f"Testo esportato in {Path(path).name}", "ok")
+        except Exception as e:  # noqa: BLE001
+            toast(self, f"Esportazione fallita: {e}", "error")

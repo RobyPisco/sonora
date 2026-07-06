@@ -32,6 +32,7 @@ class PlayBar(QFrame):
     stop_clicked = Signal()
     seek_frac = Signal(float)      # 0..1
     task_cancel = Signal()
+    task_state_changed = Signal(bool)   # True = un task lungo è in corso
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,6 +40,7 @@ class PlayBar(QFrame):
         self.setFixedHeight(72)
         self._duration = 0.0
         self._seeking = False
+        self._task_active = False
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 0, 16, 0)
@@ -168,6 +170,11 @@ class PlayBar(QFrame):
 
     # ---------- API attività ----------
 
+    @property
+    def task_active(self) -> bool:
+        """True mentre un'operazione lunga è in corso (chip attività visibile)."""
+        return self._task_active
+
     def task_update(self, text: str, pct: float | None = None,
                     cancellable: bool = False) -> None:
         """Mostra/aggiorna il chip attività. pct=None → barra indeterminata."""
@@ -179,6 +186,12 @@ class PlayBar(QFrame):
             self.task_bar.setValue(int(max(0.0, min(100.0, pct))))
         self.task_cancel_btn.setVisible(cancellable)
         self.task_chip.show()
+        if not self._task_active:
+            self._task_active = True
+            self.task_state_changed.emit(True)
 
     def task_done(self) -> None:
         self.task_chip.hide()
+        if self._task_active:
+            self._task_active = False
+            self.task_state_changed.emit(False)

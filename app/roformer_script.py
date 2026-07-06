@@ -1,7 +1,11 @@
 """Separazione stem con Roformer via audio-separator.
 
 ESEGUITO DAL VENV 3.12 del motore (ha torch CUDA + audio-separator).
-Uso: python roformer_script.py <input> <output_dir> <model_dir> <model> <format>
+Uso: python roformer_script.py <input> <output_dir> <model_dir> <model> <format> [profilo]
+
+`profilo` (opzionale): "full" (default) oppure "low" = segmenti dimezzati per
+GPU con poca VRAM (picco di memoria molto più basso, qualità quasi identica).
+Il chiamante lo usa come ripiego quando il profilo pieno va in out-of-memory.
 
 Produce nella cartella di output un file per ogni stem del modello, con nome
 minuscolo normalizzato ('vocals', 'no_vocals', 'drums', …). Funziona sia coi
@@ -28,11 +32,20 @@ def main() -> int:
         print("uso: roformer_script.py <input> <output_dir> <model_dir> <model> <format>")
         return 2
     inp, out_dir, model_dir, model, fmt = sys.argv[1:6]
+    profile = sys.argv[6] if len(sys.argv) > 6 else "full"
 
+    kwargs = {}
+    if profile == "low":
+        # segment_size ridotto + override del config del modello: abbassa il
+        # picco di VRAM (i Roformer di default usano segmenti grandi)
+        kwargs["mdxc_params"] = {"segment_size": 128,
+                                 "override_model_segment_size": True,
+                                 "batch_size": 1, "overlap": 8}
     sep = Separator(
         output_dir=out_dir,
         model_file_dir=model_dir,
         output_format=fmt.upper(),
+        **kwargs,
     )
     sep.load_model(model_filename=model)
     # NB: il parametro si chiama custom_output_names (non output_names).

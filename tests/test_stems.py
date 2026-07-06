@@ -314,3 +314,23 @@ def test_repair_engine_falls_back_to_full_install_when_torch_repair_fails(monkey
 
     ok = stems.repair_engine(lambda *_: None, lambda *_: None, lambda: False)
     assert ok is True and called.get("install") is True
+
+
+# ---------------- progress multi-passo ----------------
+
+def test_step_progress_rimappa_sul_totale():
+    """Passo 2 di 3: lo 0-100% locale diventa 33-66% sul totale."""
+    seen = []
+    cb = stems._step_progress(seen.append, 1, 3)
+    cb(0.0)
+    cb(50.0)
+    cb(100.0)
+    assert [round(v, 1) for v in seen] == [33.3, 50.0, 66.7]
+
+
+def test_step_progress_clampa_fuori_range():
+    seen = []
+    cb = stems._step_progress(seen.append, 0, 2)
+    cb(-10.0)
+    cb(150.0)
+    assert seen == [0.0, 50.0]

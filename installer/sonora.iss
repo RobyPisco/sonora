@@ -6,7 +6,7 @@
 ; AppVersion può essere passata dalla riga di comando (CI):
 ;   ISCC.exe /DAppVersion=1.6.0 installer\sonora.iss
 #ifndef AppVersion
-  #define AppVersion "1.6.0"
+  #define AppVersion "1.7.0"
 #endif
 #define AppPublisher "Pisco Factory"
 #define AppExe "Sonora.exe"

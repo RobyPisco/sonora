@@ -12,6 +12,16 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.7.0", [
+        "La barra del player in basso ora compare solo dove serve: sempre "
+        "nei Testi, altrove solo mentre gira un'operazione lunga (con il "
+        "suo progresso).",
+        "Nelle separazioni a più passi la barra di avanzamento va da 0 a "
+        "100 sul lavoro totale, senza più ripartire da zero a ogni passo.",
+        "Meno errori di memoria sulla scheda video: se la GPU non ce la fa, "
+        "Sonora riprova da sola con impostazioni più leggere e al limite "
+        "usa il processore (più lento ma affidabile).",
+    ]),
     ("1.6.0", [
         "Testi tutto nuovo: ricerca molto più efficace — prova più strategie "
         "insieme e ripulisce da sola i titoli YouTube («(Official Video)», "

@@ -208,14 +208,19 @@ def has_nvidia() -> bool:
 
 # ---------------- esecuzione subprocess con stream + cancel ----------------
 
-def _stream(cmd: list[str], on_text: Callable[[str], None], cancel: Cancel) -> int:
+def _stream(cmd: list[str], on_text: Callable[[str], None], cancel: Cancel,
+            extra_env: dict[str, str] | None = None) -> int:
     """Esegue cmd, streamma stdout(+stderr) a on_text, killabile via cancel.
 
-    Ritorna il return code (o -1 se annullato).
+    `extra_env` si somma all'ambiente isolato (es. CUDA_VISIBLE_DEVICES=-1
+    per forzare la CPU). Ritorna il return code (o -1 se annullato).
     """
+    env = _env()
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        bufsize=0, env=_env(), creationflags=_NO_WINDOW, cwd=_safe_cwd(),
+        bufsize=0, env=env, creationflags=_NO_WINDOW, cwd=_safe_cwd(),
     )
     buf = b""
     try:
@@ -663,33 +668,65 @@ def _pick_stem(folder: Path, stem: str, ext: str) -> Path | None:
 
 def _run_roformer(src: Path, model: str, out_format: str,
                   log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> Path:
-    """Separa src col modello Roformer indicato. Ritorna la cartella di output."""
+    """Separa src col modello Roformer indicato. Ritorna la cartella di output.
+
+    Come per demucs, su GPU con poca VRAM degrada gradualmente invece di
+    fallire: prima il profilo pieno, poi segmenti più corti (profilo "low"
+    dello script), infine la CPU (GPU nascosta via CUDA_VISIBLE_DEVICES)."""
     script = _roformer_script_path()
     if not script:
         raise RuntimeError("script Roformer non trovato")
     out_dir = engine_dir() / "_rof"
-    if out_dir.exists():
-        shutil.rmtree(out_dir, ignore_errors=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
     models = separator_models_dir()
     models.mkdir(parents=True, exist_ok=True)
-    log_cb(f"Separo «{src.stem}» — Roformer ({model})…")
+
+    if has_nvidia():
+        attempts = [
+            ("cuda", "full", None, ""),
+            ("cuda", "low", None,
+             "Poca memoria GPU: riprovo con segmenti più corti…"),
+            ("cpu", "full", {"CUDA_VISIBLE_DEVICES": "-1"},
+             "GPU insufficiente: ripiego sulla CPU (più lento ma affidabile)…"),
+        ]
+    else:
+        attempts = [("cpu", "full", None, "")]
 
     tail: list[str] = []
+    rc = 1
+    for device, profile, extra_env, notice in attempts:
+        if cancel():
+            rc = -1
+            break
+        if notice:
+            log_cb(notice)
+        if out_dir.exists():              # via i file parziali del tentativo prima
+            shutil.rmtree(out_dir, ignore_errors=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tail = []
+        log_cb(f"Separo «{src.stem}» — Roformer ({model}) su {device.upper()}…")
 
-    def on_text(line: str) -> None:
-        m = _PCT.search(line)
-        if m:
-            try:
-                progress_cb(float(m.group(1)))
-            except ValueError:
-                pass
-        else:
-            tail.append(line)
-            del tail[:-15]
+        def on_text(line: str, _tail: list[str] = tail) -> None:
+            m = _PCT.search(line)
+            if m:
+                try:
+                    progress_cb(float(m.group(1)))
+                except ValueError:
+                    pass
+            else:
+                # conserva le ultime righe non-progresso per diagnosticare i crash
+                _tail.append(line)
+                del _tail[:-15]
 
-    rc = _stream([str(venv_python()), script, str(src), str(out_dir),
-                  str(models), model, out_format], on_text, cancel)
+        rc = _stream([str(venv_python()), script, str(src), str(out_dir),
+                      str(models), model, out_format, profile],
+                     on_text, cancel, extra_env=extra_env)
+        if rc in (0, -1):
+            break
+        # continua coi ripieghi solo se è davvero un problema di memoria/CUDA;
+        # per altri errori insistere è inutile (mostra subito la causa vera)
+        if not any(h in " ".join(tail).lower() for h in _OOM_HINTS):
+            break
+
     if rc == -1:
         raise RuntimeError("annullato")
     if rc != 0:
@@ -800,6 +837,16 @@ def _run_demucs(src: Path, model: str, out_format: str, two_stems: bool,
     return produced
 
 
+def _step_progress(progress_cb: ProgCb, step: int, total: int) -> ProgCb:
+    """Rimappa lo 0-100% di un passo sul totale dei passi (modalità multi-passo).
+
+    Così la barra avanza in modo continuo (passo 2 di 3 = 33→66%) invece di
+    ripartire da zero a ogni passo."""
+    base = (step / total) * 100.0
+    scale = 1.0 / total
+    return lambda p: progress_cb(base + max(0.0, min(100.0, p)) * scale)
+
+
 def separate(input_file: str, mode: str, out_format: str,
              log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> list[str]:
     """Separa input_file negli stem. Ritorna i path dei file prodotti.
@@ -845,7 +892,8 @@ def separate(input_file: str, mode: str, out_format: str,
                     raise RuntimeError("annullato")
                 log_cb(f"Qualità massima — passo {i+1}/2 ({model})")
                 produced = _run_demucs(src, model, out_format, False,
-                                       log_cb, progress_cb, cancel)
+                                       log_cb, _step_progress(progress_cb, i, 2),
+                                       cancel)
                 for stem in ENSEMBLE_PICK[model]:
                     take(produced / f"{stem}{ext}")
         elif mode == "sw6":
@@ -867,7 +915,7 @@ def separate(input_file: str, mode: str, out_format: str,
             # voce da Roformer, strumenti da Demucs sullo strumentale (cascade)
             log_cb("Qualità massima — passo 1/3 (Roformer)")
             rof = _run_roformer(src, ROFORMER_MODEL, out_format,
-                                log_cb, progress_cb, cancel)
+                                log_cb, _step_progress(progress_cb, 0, 3), cancel)
             voc, inst = _pick_voc_inst(rof, ext)
             take(voc, f"vocals{ext}")
             if not inst or not inst.exists():
@@ -877,7 +925,8 @@ def separate(input_file: str, mode: str, out_format: str,
                     raise RuntimeError("annullato")
                 log_cb(f"Qualità massima — passo {i}/3 ({model} sullo strumentale)")
                 produced = _run_demucs(inst, model, out_format, False,
-                                       log_cb, progress_cb, cancel)
+                                       log_cb, _step_progress(progress_cb, i - 1, 3),
+                                       cancel)
                 for stem in ROF_PICK[model]:
                     take(produced / f"{stem}{ext}")
         else:

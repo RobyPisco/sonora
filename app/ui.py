@@ -612,7 +612,7 @@ class MainWindow(QWidget):
 
         self.stack.addWidget(dl_tab)                              # 0 · Scarica
         self._mixer_index = self.stack.addWidget(self.mixer_tab)  # 1 · Mixer
-        self.stack.addWidget(self.lyrics_tab)                     # 2 · Testi
+        self._lyrics_index = self.stack.addWidget(self.lyrics_tab)  # 2 · Testi
         self.stack.addWidget(self.settings_page)                  # 3 · Impostazioni
 
         self.rail.add_page("download", "Scarica")
@@ -620,7 +620,12 @@ class MainWindow(QWidget):
         self.rail.add_page("mic", "Testi")
         self.rail.add_page("settings", "Impostazioni", bottom=True)
         self.rail.page_selected.connect(self.stack.setCurrentIndex)
+        # playbar contestuale: fissa solo su Testi, altrove solo con task attivi
+        self.rail.page_selected.connect(lambda _i: self._update_playbar_visibility())
+        self.playbar.task_state_changed.connect(
+            lambda _on: self._update_playbar_visibility())
         self.rail.select(0)
+        self._update_playbar_visibility()
 
         # playbar ↔ mixer: un solo source of truth (il motore del mixer)
         self.playbar.play_clicked.connect(self.mixer_tab.toggle_play)
@@ -1040,6 +1045,13 @@ class MainWindow(QWidget):
         self.log_view.setVisible(on)
 
     # ---------- playbar ----------
+
+    def _update_playbar_visibility(self) -> None:
+        """Playbar fissa solo sulla pagina Testi (dove non c'è altro trasporto);
+        sulle altre compare solo mentre gira un'operazione lunga (chip attività)
+        e sparisce a lavoro finito."""
+        on_lyrics = self.stack.currentIndex() == self._lyrics_index
+        self.playbar.setVisible(on_lyrics or self.playbar.task_active)
 
     def _on_playbar_seek(self, frac: float) -> None:
         dur = self.mixer_tab.engine.duration()

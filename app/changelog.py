@@ -12,6 +12,16 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.6.0", [
+        "Testi tutto nuovo: ricerca molto più efficace — prova più strategie "
+        "insieme e ripulisce da sola i titoli YouTube («(Official Video)», "
+        "codici tra parentesi…).",
+        "Nuova libreria dei testi: col pulsante «Salva» tieni da parte un "
+        "testo e lo ritrovi quando vuoi dal pulsante «Libreria», anche senza "
+        "il brano caricato.",
+        "Rimossa la modalità karaoke: il testo è sempre semplice e leggibile; "
+        "i vecchi testi sincronizzati vengono convertiti da soli.",
+    ]),
     ("1.5.5", [
         "Risolto: l'analisi BPM/tonalità falliva sulle canzoni con parentesi "
         "quadre nel titolo (es. video YouTube «Titolo [ID]»).",

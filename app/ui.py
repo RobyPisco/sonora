@@ -609,8 +609,6 @@ class MainWindow(QWidget):
         self.update_btn = self.settings_page.update_btn
 
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
-        self.mixer_tab.position_changed.connect(self.lyrics_tab.set_position)
-        self.lyrics_tab.seek_requested.connect(self.mixer_tab.seek_seconds)
 
         self.stack.addWidget(dl_tab)                              # 0 · Scarica
         self._mixer_index = self.stack.addWidget(self.mixer_tab)  # 1 · Mixer
@@ -619,7 +617,7 @@ class MainWindow(QWidget):
 
         self.rail.add_page("download", "Scarica")
         self.rail.add_page("mixer", "Mixer")
-        self.rail.add_page("mic", "Testi e karaoke")
+        self.rail.add_page("mic", "Testi")
         self.rail.add_page("settings", "Impostazioni", bottom=True)
         self.rail.page_selected.connect(self.stack.setCurrentIndex)
         self.rail.select(0)

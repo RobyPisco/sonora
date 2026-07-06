@@ -379,3 +379,61 @@ def run_search_task(task: SearchTask) -> None:
             task.run()
 
     QThreadPool.globalInstance().start(_R())
+
+
+# ---------------- anteprima audio (estratto breve) ----------------
+
+PREVIEW_SECONDS = 20
+
+
+class PreviewSignals(QObject):
+    # url, ok, path_or_error
+    done = Signal(str, bool, str)
+
+
+class PreviewTask:
+    """Scarica solo i primi PREVIEW_SECONDS secondi di un video (bestaudio) in
+    una cartella temp, per un ascolto rapido prima di aggiungerlo alla coda."""
+
+    def __init__(self, url: str, signals: PreviewSignals):
+        self.url = url
+        self.signals = signals
+
+    def run(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        paths.ffmpeg_dir()   # assicura ffmpeg in PATH (serve al taglio/estrazione)
+        cache_dir = Path(tempfile.gettempdir()) / "sonora_preview"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        outtmpl = str(cache_dir / "%(id)s.%(ext)s")
+        opts = {
+            "format": "bestaudio/best",
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "download_ranges": yt_dlp.utils.download_range_func(None, [(0, PREVIEW_SECONDS)]),
+            "force_keyframes_at_cuts": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(self.url, download=True)
+            path = ydl.prepare_filename(info)
+            if not os.path.exists(path):
+                self.signals.done.emit(self.url, False, "File anteprima non trovato dopo il download.")
+                return
+            self.signals.done.emit(self.url, True, path)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.done.emit(self.url, False, str(exc).splitlines()[0])
+
+
+def run_preview_task(task: PreviewTask) -> None:
+    """Esegue PreviewTask in un thread del pool globale."""
+    from PySide6.QtCore import QRunnable, QThreadPool
+
+    class _R(QRunnable):
+        def run(_self) -> None:  # noqa: N805
+            task.run()
+
+    QThreadPool.globalInstance().start(_R())

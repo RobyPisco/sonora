@@ -3,7 +3,7 @@
 Aggiorna QUESTO file a ogni release: voci in italiano, dal punto di vista
 dell'utente (niente dettagli tecnici). Ordine: dalla più recente.
 Il dialogo appare al primo avvio dopo un aggiornamento (vedi ui.py) e resta
-consultabile dal pulsante «Novità» nel footer.
+consultabile dal pulsante «Novità» in Impostazioni → Aggiornamenti.
 """
 
 from __future__ import annotations
@@ -12,10 +12,27 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.5.5", [
+        "Risolto: l'analisi BPM/tonalità falliva sulle canzoni con parentesi "
+        "quadre nel titolo (es. video YouTube «Titolo [ID]»).",
+        "Se l'analisi non trova gli stem ora te lo dice chiaramente, invece "
+        "di restare in silenzio.",
+    ]),
+    ("1.5.2", [
+        "Testi: ricerca più precisa con artista e titolo separati, e nuovo "
+        "pulsante «Esporta» per salvare il testo.",
+        "Ricerca video: puoi ascoltare un'anteprima (~20 secondi) dei "
+        "risultati prima di aggiungerli alla coda.",
+    ]),
     ("1.5.0", [
+        "Interfaccia tutta nuova: barra laterale a icone al posto delle "
+        "schede, barra di riproduzione sempre visibile in basso e pagina "
+        "Impostazioni dedicata (motore stem, aggiornamenti, licenza).",
+        "Avvisi più discreti: piccole notifiche al posto delle finestre "
+        "che interrompevano il lavoro.",
         "Nuova finestra «Novità» (questa!): dopo ogni aggiornamento ti "
-        "racconta cosa è cambiato. La ritrovi quando vuoi nel pulsante "
-        "«Novità» in basso.",
+        "racconta cosa è cambiato. La ritrovi quando vuoi in Impostazioni → "
+        "Aggiornamenti.",
     ]),
     ("1.4.0", [
         "Nuovo export «Basi senza una traccia»: un mix completo per ogni "

@@ -184,7 +184,7 @@ def main():
     folder = sys.argv[1]
     paths = []
     for g in AUDIO_GLOBS:
-        paths += glob.glob(os.path.join(folder, g))
+        paths += glob.glob(os.path.join(glob.escape(folder), g))
     paths = sorted(set(paths))
     if not paths:
         print(json.dumps({"error": "nessuno stem"})); return

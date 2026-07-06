@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import theme
 from .tuner import BASS_STRINGS, GUITAR_STRINGS, PitchDetector, ToneGenerator, freq_to_note
 
 
@@ -35,7 +36,7 @@ class CentsMeter(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
-        p.fillRect(self.rect(), QColor("#161922"))
+        p.fillRect(self.rect(), QColor(theme.COLORS["panel"]))
         mid = w / 2.0
 
         # tacche -50..+50 ogni 10 cents
@@ -51,7 +52,7 @@ class CentsMeter(QWidget):
         p.fillRect(int(mid - gw), 8, int(2 * gw), h - 30, good)
 
         # etichette
-        p.setPen(QPen(QColor("#8b90a0"), 1))
+        p.setPen(QPen(QColor(theme.COLORS["muted"]), 1))
         p.drawText(6, h - 6, "♭ basso")
         p.drawText(w - 56, h - 6, "alto ♯")
 
@@ -59,7 +60,8 @@ class CentsMeter(QWidget):
         if self._cents is not None:
             cc = max(-50.0, min(50.0, float(self._cents)))
             x = mid + (cc / 50.0) * (w / 2 - 14)
-            col = QColor("#3ddc84") if self._in_tune else QColor("#ff9f43")
+            col = (QColor(theme.COLORS["ok"]) if self._in_tune
+                   else QColor(theme.COLORS["warn"]))
             p.setPen(QPen(col, 3))
             p.drawLine(int(x), 6, int(x), h - 24)
         p.end()
@@ -102,13 +104,14 @@ class TunerDialog(QDialog):
         root.addWidget(self._section_label("ACCORDATORE (MICROFONO)"))
         self.note_lbl = QLabel("—")
         self.note_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.note_lbl.setStyleSheet("color:#e6e8ee; font-size:40px; font-weight:800;")
+        self.note_lbl.setStyleSheet(
+            f"color:{theme.COLORS['text']}; font-size:40px; font-weight:800;")
         root.addWidget(self.note_lbl)
         self.meter = CentsMeter()
         root.addWidget(self.meter)
         self.hz_lbl = QLabel("suona una corda…")
         self.hz_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hz_lbl.setStyleSheet("color:#8b90a0; font-size:12px;")
+        self.hz_lbl.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:12px;")
         root.addWidget(self.hz_lbl)
         self.mic_btn = QPushButton("🎤  Avvia microfono")
         self.mic_btn.setObjectName("Primary")
@@ -123,12 +126,12 @@ class TunerDialog(QDialog):
 
     def _section_label(self, text: str) -> QLabel:
         lb = QLabel(text)
-        lb.setStyleSheet("color:#8b90a0; font-size:11px; font-weight:700;")
+        lb.setProperty("class", "SectionLabel")
         return lb
 
     def _small_label(self, text: str) -> QLabel:
         lb = QLabel(text)
-        lb.setStyleSheet("color:#6b7080; font-size:11px;")
+        lb.setProperty("class", "Hint")
         return lb
 
     def _string_grid(self, strings) -> QGridLayout:
@@ -137,6 +140,7 @@ class TunerDialog(QDialog):
         for i, (name, freq) in enumerate(strings):
             b = QPushButton(name)
             b.setObjectName("GhostMini")
+            b.setProperty("accent", "ok")
             b.clicked.connect(lambda _=False, f=freq, btn=b: self._toggle_tone(f, btn))
             self._ref_btns.append((freq, b))
             grid.addWidget(b, 0, i)
@@ -157,7 +161,7 @@ class TunerDialog(QDialog):
 
     def _highlight_ref(self, active) -> None:
         for _f, b in self._ref_btns:
-            b.setStyleSheet("background:#3ddc84;color:#14161c;" if b is active else "")
+            theme.set_state(b, "on", b is active)
 
     # ---------- microfono ----------
 
@@ -168,7 +172,6 @@ class TunerDialog(QDialog):
             self.detector.close()
             self.detector.reset()
             self.mic_btn.setText("🎤  Avvia microfono")
-            self.mic_btn.setStyleSheet("")
             self.note_lbl.setText("—")
             self.meter.set_cents(None)
             self.hz_lbl.setText("suona una corda…")
@@ -180,7 +183,6 @@ class TunerDialog(QDialog):
             return
         self._mic_on = True
         self.mic_btn.setText("◼  Ferma microfono")
-        self.mic_btn.setStyleSheet("background:#ff3b5c;color:#fff;")
         self._timer.start()
 
     def _tick(self) -> None:

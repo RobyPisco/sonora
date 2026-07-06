@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,30 +27,38 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QSystemTrayIcon,
-    QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from . import __version__, app_update, changelog, config, history, paths, stems, updater
+from . import __version__, app_update, changelog, config, history, icons, paths, stems, theme, updater
+from .toast import Banner, toast
+from .ui_playbar import PlayBar
+from .ui_settings import SettingsPage
+from .ui_shell import NavRail
 from .downloader import (
     AUDIO_FORMATS,
     DownloadOptions,
     DownloadWorker,
     InfoSignals,
     InfoTask,
+    PreviewSignals,
+    PreviewTask,
     QueueItem,
     SearchSignals,
     SearchTask,
     make_thread,
     run_info_task,
+    run_preview_task,
     run_search_task,
 )
+from .preview_player import PreviewPlayer
 from .ui_mixer import MixerTab
 from .ui_lyrics import LyricsTab
 
@@ -188,19 +196,15 @@ TEMPLATES: list[tuple[str, str]] = [
     ("Titolo [id]", "%(title)s [%(id)s]"),
 ]
 
-STATUS_COLORS = {
-    "in attesa": "#8b90a0",
-    "scaricando": "#5aa9ff",
-    "conversione": "#ffb454",
-    "fatto": "#3ddc84",
-    "errore": "#ff4d63",
-}
+# etichetta breve per il chip Stem (dalla modalità)
+STEM_SHORT = {"sw6": "6 · SW", "rof6": "6 · Rof+D", "6hq": "6 · HQ",
+              "6": "6 · Demucs", "4": "4 · Demucs", "rof": "2 · Rof", "2": "2 · Demucs"}
 
 
 class QueueRow(QWidget):
     """Riga visuale per un item della coda: miniatura, titolo, durata, stato, progress."""
 
-    THUMB_W, THUMB_H = 64, 44
+    THUMB_W, THUMB_H = 62, 44
 
     def __init__(self, item: QueueItem):
         super().__init__()
@@ -212,8 +216,10 @@ class QueueRow(QWidget):
         # miniatura
         self.thumb_lbl = QLabel()
         self.thumb_lbl.setFixedSize(self.THUMB_W, self.THUMB_H)
-        self.thumb_lbl.setStyleSheet("background:#232733; border-radius:6px;")
+        self.thumb_lbl.setStyleSheet(
+            f"background:{theme.COLORS['input']}; border-radius:8px;")
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_lbl.setPixmap(icons.pixmap("music", theme.COLORS["faint"], 18))
         outer.addWidget(self.thumb_lbl, 0)
 
         lay = QVBoxLayout()
@@ -227,9 +233,10 @@ class QueueRow(QWidget):
         self.title_lbl.setStyleSheet("font-weight:600;")
         self.title_lbl.setWordWrap(False)
         self.dur_lbl = QLabel("")
-        self.dur_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
+        self.dur_lbl.setProperty("class", "Hint")
         self.status_lbl = QLabel(item.status)
-        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.status_lbl.setObjectName("StatusChip")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._style_status(item.status)
         top.addWidget(self.title_lbl, 1)
         top.addWidget(self.dur_lbl, 0)
@@ -243,7 +250,7 @@ class QueueRow(QWidget):
         lay.addWidget(self.bar)
 
         self.detail_lbl = QLabel("")
-        self.detail_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
+        self.detail_lbl.setProperty("class", "Hint")
         lay.addWidget(self.detail_lbl)
 
     def _display_title(self) -> str:
@@ -251,8 +258,13 @@ class QueueRow(QWidget):
         return t if len(t) <= 70 else t[:67] + "…"
 
     def _style_status(self, status: str) -> None:
-        color = STATUS_COLORS.get(status, "#8b90a0")
-        self.status_lbl.setStyleSheet(f"color:{color}; font-weight:600; font-size:12px;")
+        """Colora il chip di stato via dynamic property (regole in style.qss)."""
+        key = status
+        if status.startswith(("motore", "analisi", "stem")):
+            key = "stem"
+        if key not in ("fatto", "errore", "scaricando", "conversione", "stem"):
+            key = ""
+        theme.set_state(self.status_lbl, "status", key)
 
     def set_info(self, title: str, duration: str, thumb_bytes: bytes) -> None:
         """Aggiorna anteprima (titolo/durata/miniatura) dopo il fetch info."""
@@ -288,12 +300,14 @@ class QueueRow(QWidget):
             self.bar.setValue(100)
             self.status_lbl.setText("fatto")
             self.detail_lbl.setText("")
-            self.detail_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
+            self.detail_lbl.setStyleSheet(
+                f"color:{theme.COLORS['faint']}; font-size:11px;")
         else:
             self.item.status = "errore"
             self.item.error = result
             self.status_lbl.setText("errore")
-            self.detail_lbl.setStyleSheet("color:#ff6b7d; font-size:11px;")
+            self.detail_lbl.setStyleSheet(
+                f"color:{theme.COLORS['err']}; font-size:11px;")
             self.detail_lbl.setText(result)
         self._style_status(self.item.status)
 
@@ -390,22 +404,19 @@ def _card() -> QFrame:
 def _section_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setProperty("class", "SectionLabel")
-    lbl.setStyleSheet("color:#8b90a0; font-size:11px; font-weight:600;")
     return lbl
 
 
 class MainWindow(QWidget):
-    # soglia (px) sotto la quale il corpo passa da due colonne a colonna unica
-    NARROW_W = 900
     # larghezza massima del contenuto centrato sui monitor grandi
-    CONTENT_MAX_W = 1500
+    CONTENT_MAX_W = 1000
 
     def __init__(self):
         super().__init__()
         self.setObjectName("Root")
         self.setWindowTitle(f"Sonora {__version__} — Pisco Factory")
-        self.resize(760, 880)
-        self.setMinimumSize(520, 640)
+        self.resize(1100, 860)
+        self.setMinimumSize(760, 600)
 
         self.cfg = config.load()
         self.queue: list[QueueItem] = []
@@ -419,7 +430,6 @@ class MainWindow(QWidget):
         self._appchk_verbose = False
         self._appupd_thread: QThread | None = None    # download installer app
         self._appupd_worker = None
-        self._appupd_progress: QProgressDialog | None = None
         self._stem_thread: QThread | None = None
         self._stem_worker: StemWorker | None = None
         self._uninst_thread: QThread | None = None
@@ -442,6 +452,14 @@ class MainWindow(QWidget):
         self._search_signals = SearchSignals()
         self._search_signals.done.connect(self._on_search_done)
         self._search_query = ""
+
+        # anteprima audio (estratto breve) sui risultati di ricerca
+        self._preview_signals = PreviewSignals()
+        self._preview_signals.done.connect(self._on_preview_ready)
+        self._preview_player = PreviewPlayer()
+        self._preview_url = ""    # url dell'anteprima corrente (caricamento o riproduzione)
+        self._preview_path = ""   # file temp corrente, per pulizia
+        self._preview_title = ""
 
         self.setAcceptDrops(True)   # drag & drop link
 
@@ -524,24 +542,31 @@ class MainWindow(QWidget):
         threading.Thread(target=_work, daemon=True).start()
 
     def _refresh_license_ui(self) -> None:
-        """Aggiorna il footer (banner prova + pulsante Attiva) secondo lo stato."""
-        text = f"Sonora v{__version__}  ·  © 2026 Pisco Factory"
+        """Aggiorna banner prova (Scarica) e pagina Impostazioni·Licenza."""
+        status_text = "Stato sconosciuto"
         show_activate = True
+        banner_text = ""
         try:
             from . import licensing
             st = licensing.status()
             if st.state == "trial":
                 giorni = "1 giorno" if st.days_left == 1 else f"{st.days_left} giorni"
-                text += f"  ·  Prova: {giorni}"
+                status_text = f"Prova gratuita — {giorni} rimasti."
+                banner_text = f"Prova gratuita: {giorni} rimasti."
             elif st.state == "expired":
-                text += "  ·  Prova scaduta"
+                status_text = "Prova scaduta. Inserisci un codice per continuare."
+                banner_text = "La prova è scaduta: attiva Sonora con un codice."
             else:  # licensed
-                text += "  ·  Attivo"
+                status_text = "Sonora è attiva su questo computer. ✓"
                 show_activate = False
-        except Exception:  # noqa: BLE001 (il footer non deve mai bloccare la UI)
+        except Exception:  # noqa: BLE001 (lo stato licenza non deve mai bloccare la UI)
             pass
-        self._brand_label.setText(text)
-        self._activate_btn.setVisible(show_activate)
+        if hasattr(self, "settings_page"):
+            self.settings_page.license_lbl.setText(status_text)
+            self.settings_page.activate_btn.setVisible(show_activate)
+        if hasattr(self, "trial_banner"):
+            self.trial_banner.set_text(banner_text)
+            self.trial_banner.setVisible(bool(banner_text))
 
     def _open_activation(self) -> None:
         """Apre la finestra di attivazione codice (da pulsante Attiva)."""
@@ -555,63 +580,57 @@ class MainWindow(QWidget):
     # ---------- costruzione UI ----------
 
     def _build_ui(self) -> None:
-        # finestra a schede: Scarica (downloader) + Mixer
-        shell = QVBoxLayout(self)
+        # shell: rail di navigazione a sinistra, pagine al centro, playbar sotto
+        shell = QHBoxLayout(self)
         shell.setContentsMargins(0, 0, 0, 0)
-        self.tabs = QTabWidget()
-        shell.addWidget(self.tabs, 1)
-
-        # footer globale: brand + copyright + versione + Info (su entrambe le schede)
-        footer = QFrame()
-        footer.setObjectName("Footer")
-        fl = QHBoxLayout(footer)
-        fl.setContentsMargins(16, 4, 16, 4)
-        fl.setSpacing(10)
-        self._brand_label = QLabel()
-        self._brand_label.setStyleSheet("color:#6b7080; font-size:11px;")
-        disclaimer = QLabel("Usa solo contenuti di cui detieni i diritti.")
-        disclaimer.setStyleSheet("color:#565b6b; font-size:11px; font-style:italic;")
-        # pulsante Attiva: apre la finestra del codice in qualsiasi momento
-        # (visibile durante la prova o se scaduta; nascosto se già attivata).
-        self._activate_btn = QPushButton("Attiva")
-        self._activate_btn.setObjectName("GhostMini")
-        self._activate_btn.setFixedWidth(60)
-        self._activate_btn.clicked.connect(self._open_activation)
-        info_btn = QPushButton("Info")
-        info_btn.setObjectName("GhostMini")
-        info_btn.setFixedWidth(50)
-        info_btn.clicked.connect(self._show_about)
-        news_btn = QPushButton("Novità")
-        news_btn.setObjectName("GhostMini")
-        news_btn.setFixedWidth(60)
-        news_btn.setToolTip("Cosa è cambiato nelle varie versioni di Sonora.")
-        news_btn.clicked.connect(lambda: self._show_changelog(changelog.CHANGELOG))
-        fl.addWidget(self._brand_label)
-        fl.addStretch(1)
-        fl.addWidget(disclaimer)
-        fl.addWidget(self._activate_btn)
-        fl.addWidget(news_btn)
-        fl.addWidget(info_btn)
-        shell.addWidget(footer, 0)
-        self._refresh_license_ui()
+        shell.setSpacing(0)
+        self.rail = NavRail()
+        shell.addWidget(self.rail, 0)
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(0)
+        self.stack = QStackedWidget()
+        right.addWidget(self.stack, 1)
+        self.playbar = PlayBar()
+        right.addWidget(self.playbar, 0)
+        shell.addLayout(right, 1)
 
         dl_tab = QWidget()
         dl_tab.setObjectName("Root")
         self.mixer_tab = MixerTab()
         self.lyrics_tab = LyricsTab(self)
+        self.settings_page = SettingsPage(self)
+        # alias: la logica esistente usa questi nomi (ora vivono in Impostazioni)
+        self.watch_chk = self.settings_page.watch_chk
+        self.notify_chk = self.settings_page.notify_chk
+        self.engine_lbl = self.settings_page.engine_lbl
+        self.engine_btn = self.settings_page.engine_btn
+        self.ytdlp_lbl = self.settings_page.ytdlp_lbl
+        self.update_btn = self.settings_page.update_btn
+
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
         self.mixer_tab.position_changed.connect(self.lyrics_tab.set_position)
         self.lyrics_tab.seek_requested.connect(self.mixer_tab.seek_seconds)
-        self.tabs.addTab(dl_tab, "Scarica")
-        self._mixer_index = self.tabs.addTab(self.mixer_tab, "Mixer")
-        self.tabs.addTab(self.lyrics_tab, "Testi")
 
-        # azioni del mixer (Accordatore/Esporta/Analizza/Recenti) sulla barra
-        # schede, a destra; visibili solo quando la scheda Mixer è attiva.
-        self.tabs.setCornerWidget(self.mixer_tab.actions_host,
-                                  Qt.Corner.TopRightCorner)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
-        self._on_tab_changed(self.tabs.currentIndex())
+        self.stack.addWidget(dl_tab)                              # 0 · Scarica
+        self._mixer_index = self.stack.addWidget(self.mixer_tab)  # 1 · Mixer
+        self.stack.addWidget(self.lyrics_tab)                     # 2 · Testi
+        self.stack.addWidget(self.settings_page)                  # 3 · Impostazioni
+
+        self.rail.add_page("download", "Scarica")
+        self.rail.add_page("mixer", "Mixer")
+        self.rail.add_page("mic", "Testi e karaoke")
+        self.rail.add_page("settings", "Impostazioni", bottom=True)
+        self.rail.page_selected.connect(self.stack.setCurrentIndex)
+        self.rail.select(0)
+
+        # playbar ↔ mixer: un solo source of truth (il motore del mixer)
+        self.playbar.play_clicked.connect(self.mixer_tab.toggle_play)
+        self.playbar.stop_clicked.connect(self.mixer_tab.stop_playback)
+        self.playbar.seek_frac.connect(self._on_playbar_seek)
+        self.playbar.task_cancel.connect(self._on_stop)
+        self.mixer_tab.position_changed.connect(self._on_mixer_pos)
+        self.mixer_tab.song_loaded.connect(self._on_song_loaded)
 
         page = QVBoxLayout(dl_tab)
         page.setContentsMargins(0, 0, 0, 0)
@@ -629,9 +648,6 @@ class MainWindow(QWidget):
         content.setObjectName("Root")
         scroll.setWidget(content)
 
-        # contenitore centrato con larghezza massima (fluido: niente min-width
-        # rigida, così su monitor piccoli il contenuto si adatta invece di
-        # sovrapporsi; sui monitor grandi resta centrato entro CONTENT_MAX_W)
         outer = QHBoxLayout(content)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addStretch(1)
@@ -641,50 +657,69 @@ class MainWindow(QWidget):
         outer.addStretch(1)
 
         root = QVBoxLayout(container)
-        root.setContentsMargins(26, 22, 26, 10)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 24, 32, 10)
+        root.setSpacing(14)
+        self._dl_root = root
 
-        # header
-        header = QVBoxLayout()
-        header.setSpacing(2)
-        title_row = QHBoxLayout()
-        title_row.setSpacing(10)
-        title = QLabel("Sonora")
-        title.setObjectName("Title")
-        ver = QLabel(f"v{__version__}")
-        ver.setStyleSheet("color:#6b7080; font-size:12px; font-weight:600;")
-        ver.setAlignment(Qt.AlignmentFlag.AlignBottom)
-        title_row.addWidget(title, 0)
-        title_row.addWidget(ver, 0, Qt.AlignmentFlag.AlignBottom)
-        title_row.addStretch(1)
-        sub = QLabel("Scarica l'audio da YouTube — mp3, m4a, opus, flac, wav")
-        sub.setObjectName("Subtitle")
-        header.addLayout(title_row)
-        header.addWidget(sub)
-        root.addLayout(header)
+        # banner inline: stato prova + motore stem mancante (niente popup)
+        self.trial_banner = Banner("", kind="info", action_text="Attiva",
+                                   action=self._open_activation)
+        self.trial_banner.hide()
+        root.addWidget(self.trial_banner)
+        self.engine_banner = Banner(
+            "Motore di separazione non installato. Serve un download di ~3 GB, "
+            "una volta sola.", kind="warn",
+            action_text="Installa motore", action=self._on_install_engine)
+        self.engine_banner.hide()
+        root.addWidget(self.engine_banner)
 
-        # --- card URL ---
-        url_card = _card()
-        uc = QVBoxLayout(url_card)
-        uc.setContentsMargins(16, 14, 16, 16)
-        uc.setSpacing(10)
-        uc.addWidget(_section_label("LINK YOUTUBE"))
-        url_row = QHBoxLayout()
+        # --- hero: un solo campo per cercare o incollare ---
+        root.addSpacing(16)
+        eyebrow = QLabel(f"SONORA  ·  v{__version__}")
+        eyebrow.setProperty("class", "Eyebrow")
+        eyebrow.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        hero_title = QLabel("Cosa suoniamo oggi?")
+        hero_title.setObjectName("Title")
+        hero_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        hero_sub = QLabel("Incolla un link o cerca un brano. Poi scaricalo, "
+                          "separalo in stem e suonaci sopra.")
+        hero_sub.setObjectName("Subtitle")
+        hero_sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        root.addWidget(eyebrow)
+        root.addWidget(hero_title)
+        root.addWidget(hero_sub)
+        root.addSpacing(8)
+
+        search_row = QHBoxLayout()
         self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText(
-            "Incolla un link, oppure scrivi cosa cercare e premi Invio…")
+        self.url_edit.setPlaceholderText("Cerca un brano o incolla un link…")
+        self.url_edit.setMinimumHeight(44)
         self.url_edit.returnPressed.connect(self._on_add)
         add_btn = QPushButton("Aggiungi")
+        add_btn.setObjectName("Primary")
+        add_btn.setMinimumHeight(44)
         add_btn.clicked.connect(self._on_add)
-        load_file_btn = QPushButton("Carica file…")
+        load_file_btn = QPushButton()
         load_file_btn.setObjectName("Ghost")
+        load_file_btn.setIcon(icons.icon("folder", theme.COLORS["muted"], 16))
+        load_file_btn.setIconSize(QSize(16, 16))
+        load_file_btn.setMinimumHeight(44)
+        load_file_btn.setFixedWidth(48)
         load_file_btn.setToolTip(
             "Aggiungi alla coda un file audio già scaricato (poi separabile in stem).")
         load_file_btn.clicked.connect(self._on_load_file)
-        url_row.addWidget(self.url_edit, 1)
-        url_row.addWidget(add_btn)
-        url_row.addWidget(load_file_btn)
-        uc.addLayout(url_row)
+        search_host = QWidget()
+        sh = QHBoxLayout(search_host)
+        sh.setContentsMargins(0, 0, 0, 0)
+        sh.setSpacing(8)
+        sh.addWidget(self.url_edit, 1)
+        sh.addWidget(add_btn, 0)
+        sh.addWidget(load_file_btn, 0)
+        search_host.setMaximumWidth(680)
+        search_row.addStretch(1)
+        search_row.addWidget(search_host, 20)
+        search_row.addStretch(1)
+        root.addLayout(search_row)
 
         # --- pannello risultati ricerca (inline, nascosto finché non si cerca) ---
         self.search_panel = QWidget()
@@ -694,33 +729,39 @@ class MainWindow(QWidget):
         search_head = QHBoxLayout()
         self.search_label = QLabel("Risultati ricerca")
         self.search_label.setObjectName("Subtitle")
-        search_close = QPushButton("✕")
-        search_close.setObjectName("Ghost")
-        search_close.setFixedWidth(34)
+        self.preview_lbl = QLabel("")
+        self.preview_lbl.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:12px;")
+        self.preview_lbl.hide()
+        self.preview_btn = QPushButton()
+        self.preview_btn.setObjectName("GhostMini")
+        self.preview_btn.setFixedSize(30, 30)
+        self.preview_btn.setToolTip("Ferma anteprima")
+        self.preview_btn.clicked.connect(self._stop_preview)
+        self.preview_btn.hide()
+        search_close = QPushButton()
+        search_close.setObjectName("GhostMini")
+        search_close.setIcon(icons.icon("x", theme.COLORS["muted"], 12))
+        search_close.setFixedSize(30, 30)
         search_close.setToolTip("Chiudi i risultati")
         search_close.clicked.connect(self._close_search)
         search_head.addWidget(self.search_label, 1)
+        search_head.addWidget(self.preview_lbl, 0)
+        search_head.addWidget(self.preview_btn, 0)
         search_head.addWidget(search_close, 0)
         sp.addLayout(search_head)
         self.search_list = QListWidget()
         self.search_list.setMaximumHeight(230)
+        self.search_list.itemClicked.connect(self._on_search_preview)
         self.search_list.itemActivated.connect(self._on_search_pick)
         self.search_list.itemDoubleClicked.connect(self._on_search_pick)
         sp.addWidget(self.search_list)
         self.search_panel.hide()
-        uc.addWidget(self.search_panel)
+        root.addWidget(self.search_panel)
 
-        url_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        root.addWidget(url_card)
+        # --- chip opzioni rapide (formato / stem / normalizza / altre opzioni) ---
+        self._build_chips(root)
 
-        # --- corpo responsive: due colonne su schermi larghi, colonna unica
-        # in verticale sui monitor piccoli (disposizione gestita da
-        # _apply_layout in base alla larghezza della finestra) ---
-        self.body_container = QWidget()
-        self.body_container.setObjectName("Root")
-        root.addWidget(self.body_container, 1)
-
-        # --- card opzioni ---
+        # --- card opzioni (disclosure: aperta dal chip «Altre opzioni») ---
         self.opt_card = _card()
         opt_card = self.opt_card
         oc = QVBoxLayout(opt_card)
@@ -740,6 +781,8 @@ class MainWindow(QWidget):
         self.fmt_combo = QComboBox()
         self.fmt_combo.addItems(AUDIO_FORMATS)
         self.fmt_combo.currentTextChanged.connect(self._on_format_changed)
+        self.fmt_combo.currentTextChanged.connect(
+            lambda _t: self._refresh_chips())
         fmt_box.addWidget(self.fmt_combo)
         line1.addLayout(fmt_box, 1)
 
@@ -748,6 +791,8 @@ class MainWindow(QWidget):
         br_box.addWidget(_section_label("BITRATE (mp3)"))
         self.br_combo = QComboBox()
         self.br_combo.addItems(["128", "192", "320"])
+        self.br_combo.currentTextChanged.connect(
+            lambda _t: self._refresh_chips())
         br_box.addWidget(self.br_combo)
         line1.addLayout(br_box, 1)
 
@@ -785,7 +830,7 @@ class MainWindow(QWidget):
         dest_box.addLayout(dest_row)
         oc.addLayout(dest_box)
 
-        # toggle
+        # toggle download
         tog_row = QHBoxLayout()
         self.meta_chk = QCheckBox("Includi metadata (titolo/artista)")
         self.thumb_chk = QCheckBox("Includi copertina (cover)")
@@ -794,30 +839,11 @@ class MainWindow(QWidget):
             "Ogni download finisce in una sua cartella col titolo del video,\n"
             "dentro la cartella di destinazione."
         )
-        self.norm_chk = QCheckBox("Normalizza volume")
-        self.norm_chk.setToolTip(
-            "Applica loudnorm: tutti i brani allo stesso livello di volume.\n"
-            "La conversione e' un po' piu lenta."
-        )
         tog_row.addWidget(self.meta_chk)
         tog_row.addWidget(self.thumb_chk)
+        tog_row.addWidget(self.folder_chk)
         tog_row.addStretch(1)
         oc.addLayout(tog_row)
-
-        tog_row2 = QHBoxLayout()
-        tog_row2.addWidget(self.folder_chk)
-        tog_row2.addWidget(self.norm_chk)
-        tog_row2.addStretch(1)
-        oc.addLayout(tog_row2)
-
-        self.watch_chk = QCheckBox("Monitora appunti")
-        self.watch_chk.setToolTip("Aggiunge automaticamente in coda i link YouTube che copi.")
-        self.notify_chk = QCheckBox("Avvisa a fine (notifica + suono)")
-        tog_row3 = QHBoxLayout()
-        tog_row3.addWidget(self.watch_chk)
-        tog_row3.addWidget(self.notify_chk)
-        tog_row3.addStretch(1)
-        oc.addLayout(tog_row3)
 
         # --- riga STEM (separazione sorgenti) ---
         stem_row = QHBoxLayout()
@@ -833,12 +859,10 @@ class MainWindow(QWidget):
             "• Roformer+Demucs: voce leggermente migliore ma 3 passaggi (lento)\n"
             "• Demucs: più veloce, qualità inferiore\n"
             "• Voce/strumentale: due tracce, ideale per karaoke")
+        self.stem_mode_combo.currentIndexChanged.connect(
+            lambda _i: self._refresh_chips())
         self.stem_fmt_combo = QComboBox()
         self.stem_fmt_combo.addItems(STEM_FORMATS)
-        self.stem_all_btn = QPushButton("Separa tutti")
-        self.stem_all_btn.setObjectName("Ghost")
-        self.stem_all_btn.setToolTip("Separa in stem tutti i brani pronti in coda.")
-        self.stem_all_btn.clicked.connect(self._on_separate_all)
         self.stem_file_btn = QPushButton("Separa file…")
         self.stem_file_btn.setObjectName("Ghost")
         self.stem_file_btn.setToolTip("Scegli un file audio locale da separare in stem.")
@@ -847,76 +871,35 @@ class MainWindow(QWidget):
         stem_row.addWidget(self.stem_mode_combo)
         stem_row.addWidget(self.stem_fmt_combo)
         stem_row.addStretch(1)
-        stem_row.addWidget(self.stem_all_btn)
         stem_row.addWidget(self.stem_file_btn)
         oc.addLayout(stem_row)
 
-        # riga stato motore stem
-        eng_row = QHBoxLayout()
-        self.engine_lbl = QLabel("")
-        self.engine_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
-        self.engine_opts_btn = QPushButton("Opzioni ▾")
-        self.engine_opts_btn.setObjectName("Ghost")
-        self.engine_opts_btn.setToolTip("Disinstalla il motore o cambia la cartella di installazione.")
-        eng_menu = QMenu(self.engine_opts_btn)
-        eng_menu.addAction("Verifica / Ripara motore", self._on_verify_engine)
-        eng_menu.addSeparator()
-        eng_menu.addAction("Disinstalla motore", self._on_uninstall_engine)
-        eng_menu.addAction("Cartella di installazione…", self._on_change_engine_location)
-        self.engine_opts_btn.setMenu(eng_menu)
-        self.engine_btn = QPushButton("Installa motore")
-        self.engine_btn.setObjectName("Ghost")
-        self.engine_btn.setToolTip("Scarica/aggiorna il motore stem (Demucs + PyTorch, ~3GB).")
-        self.engine_btn.clicked.connect(self._on_install_engine)
-        eng_row.addWidget(self.engine_lbl, 1)
-        eng_row.addWidget(self.engine_opts_btn, 0)
-        eng_row.addWidget(self.engine_btn, 0)
-        oc.addLayout(eng_row)
-
-        # riga manutenzione: versione yt-dlp + aggiorna
-        maint_row = QHBoxLayout()
-        self.ytdlp_lbl = QLabel("")
-        self.ytdlp_lbl.setStyleSheet("color:#6b7080; font-size:11px;")
-        self.update_btn = QPushButton("Aggiorna yt-dlp")
-        self.update_btn.setObjectName("Ghost")
-        self.update_btn.setToolTip(
-            "Scarica l'ultima versione di yt-dlp.\n"
-            "Necessario ogni tanto: YouTube cambia spesso.\n"
-            "Ha effetto dopo il riavvio dell'app."
-        )
-        self.update_btn.clicked.connect(self._on_update_ytdlp)
-        maint_row.addWidget(self.ytdlp_lbl, 1)
-        maint_row.addWidget(self.update_btn, 0)
-        oc.addLayout(maint_row)
-
         # la card prende l'altezza del contenuto e non si comprime sotto di essa
         opt_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        opt_card.hide()
+        root.addWidget(opt_card)
+        root.addSpacing(8)
 
         # altezze minime esplicite: combo e campi non possono sovrapporsi
-        for w in (self.url_edit, self.fmt_combo, self.br_combo, self.tpl_combo,
+        for w in (self.fmt_combo, self.br_combo, self.tpl_combo,
                   self.custom_tpl_edit, self.dest_edit):
             w.setMinimumHeight(38)
 
-        # blocco LOG (etichetta + vista log)
-        self.log_block = QWidget()
-        log_lay = QVBoxLayout(self.log_block)
-        log_lay.setContentsMargins(0, 0, 0, 0)
-        log_lay.setSpacing(8)
-        log_lay.addWidget(_section_label("LOG"))
-        self.log_view = QPlainTextEdit()
-        self.log_view.setObjectName("Log")
-        self.log_view.setReadOnly(True)
-        self.log_view.setMinimumHeight(140)
-        log_lay.addWidget(self.log_view, 1)
-
-        # blocco CODA (intestazione + lista)
+        # --- blocco CODA (intestazione + lista) ---
         self.queue_block = QWidget()
         q_lay = QVBoxLayout(self.queue_block)
         q_lay.setContentsMargins(0, 0, 0, 0)
-        q_lay.setSpacing(12)
+        q_lay.setSpacing(10)
         queue_head = QHBoxLayout()
-        queue_head.addWidget(_section_label("CODA"))
+        queue_head.setSpacing(8)
+        coda_lbl = QLabel("Coda")
+        coda_lbl.setStyleSheet("font-size:15px; font-weight:600;")
+        queue_head.addWidget(coda_lbl)
         queue_head.addStretch(1)
+        self.stem_all_btn = QPushButton("Separa tutti")
+        self.stem_all_btn.setObjectName("Ghost")
+        self.stem_all_btn.setToolTip("Separa in stem tutti i brani pronti in coda.")
+        self.stem_all_btn.clicked.connect(self._on_separate_all)
         self.history_btn = QPushButton("Cronologia")
         self.history_btn.setObjectName("Ghost")
         self.history_btn.clicked.connect(self._on_show_history)
@@ -926,6 +909,7 @@ class MainWindow(QWidget):
         self.clear_btn = QPushButton("Svuota")
         self.clear_btn.setObjectName("Ghost")
         self.clear_btn.clicked.connect(self._on_clear)
+        queue_head.addWidget(self.stem_all_btn)
         queue_head.addWidget(self.history_btn)
         queue_head.addWidget(self.retry_btn)
         queue_head.addWidget(self.clear_btn)
@@ -937,10 +921,25 @@ class MainWindow(QWidget):
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
         q_lay.addWidget(self.list_widget, 1)
+        root.addWidget(self.queue_block, 1)
 
-        # disponi i blocchi (opzioni/coda/log) in base alla larghezza corrente
-        self._narrow: bool | None = None
-        self._update_responsive()
+        # --- log: disclosure in fondo, chiusa di default ---
+        self.log_toggle = QToolButton()
+        self.log_toggle.setText("Log")
+        self.log_toggle.setCheckable(True)
+        self.log_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.log_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.log_toggle.setStyleSheet(
+            f"QToolButton{{border:none;background:transparent;"
+            f"color:{theme.COLORS['faint']};font-size:12px;font-weight:600;}}")
+        self.log_view = QPlainTextEdit()
+        self.log_view.setObjectName("Log")
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(140)
+        self.log_view.hide()
+        self.log_toggle.toggled.connect(self._on_log_toggle)
+        root.addWidget(self.log_toggle)
+        root.addWidget(self.log_view)
 
         # --- barra azioni fissa in basso (fuori dallo scroll) ---
         bar = QWidget()
@@ -954,7 +953,7 @@ class MainWindow(QWidget):
         bar_outer.addStretch(1)
 
         actions = QHBoxLayout(bar_inner)
-        actions.setContentsMargins(26, 10, 26, 16)
+        actions.setContentsMargins(32, 10, 32, 16)
         self.open_btn = QPushButton("Apri cartella")
         self.open_btn.setObjectName("Ghost")
         self.open_btn.clicked.connect(self._on_open_folder)
@@ -963,8 +962,10 @@ class MainWindow(QWidget):
         self.stop_btn.setMinimumWidth(90)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._on_stop)
-        self.download_btn = QPushButton("⬇  Scarica")
+        self.download_btn = QPushButton("Scarica")
         self.download_btn.setObjectName("Primary")
+        self.download_btn.setIcon(icons.icon("download", "#ffffff", 16))
+        self.download_btn.setIconSize(QSize(16, 16))
         self.download_btn.setMinimumWidth(160)
         self.download_btn.clicked.connect(self._on_download)
         actions.addWidget(self.open_btn)
@@ -973,47 +974,94 @@ class MainWindow(QWidget):
         actions.addWidget(self.download_btn)
         page.addWidget(bar)
 
-    # ---------- layout responsive ----------
+        self._refresh_license_ui()
+
+    # ---------- chip opzioni rapide ----------
+
+    def _build_chips(self, root: QVBoxLayout) -> None:
+        """Riga di chip sotto la searchbox: formato, stem, normalizza, altre opzioni."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        self.chip_format = QPushButton("MP3")
+        self.chip_format.setObjectName("Chip")
+        self.chip_format.setToolTip("Formato dei download (clic per cambiare)")
+        fmt_menu = QMenu(self.chip_format)
+        for f in AUDIO_FORMATS:
+            fmt_menu.addAction(f, lambda f=f: self.fmt_combo.setCurrentText(f))
+        br_menu = fmt_menu.addMenu("Bitrate mp3")
+        for b in ("128", "192", "320"):
+            br_menu.addAction(f"{b} kbps", lambda b=b: self.br_combo.setCurrentText(b))
+        self.chip_format.setMenu(fmt_menu)
+
+        self.chip_stem = QPushButton("Stem")
+        self.chip_stem.setObjectName("Chip")
+        self.chip_stem.setToolTip("Modalità di separazione stem (clic per cambiare)")
+        stem_menu = QMenu(self.chip_stem)
+        for i, (label, _v) in enumerate(STEM_MODES):
+            stem_menu.addAction(
+                label, lambda i=i: self.stem_mode_combo.setCurrentIndex(i))
+        self.chip_stem.setMenu(stem_menu)
+
+        # «Normalizza» è un toggle: il chip stesso fa da stato (isChecked)
+        self.norm_chk = QPushButton("Normalizza")
+        self.norm_chk.setObjectName("Chip")
+        self.norm_chk.setCheckable(True)
+        self.norm_chk.setToolTip(
+            "Applica loudnorm: tutti i brani allo stesso livello di volume.\n"
+            "La conversione e' un po' piu lenta.")
+
+        self.chip_more = QPushButton("Altre opzioni ▾")
+        self.chip_more.setObjectName("Chip")
+        self.chip_more.setCheckable(True)
+        self.chip_more.toggled.connect(self._on_more_toggle)
+
+        row.addStretch(1)
+        for c in (self.chip_format, self.chip_stem, self.norm_chk, self.chip_more):
+            row.addWidget(c)
+        row.addStretch(1)
+        root.addLayout(row)
+
+    def _refresh_chips(self) -> None:
+        """Allinea le etichette dei chip allo stato di combo/bitrate."""
+        fmt = self.fmt_combo.currentText()
+        label = fmt.upper()
+        if fmt == "mp3":
+            label += f" · {self.br_combo.currentText()}k"
+        self.chip_format.setText(label)
+        mode = STEM_MODES[self.stem_mode_combo.currentIndex()][1]
+        self.chip_stem.setText(f"Stem · {STEM_SHORT.get(mode, mode)}")
+
+    def _on_more_toggle(self, on: bool) -> None:
+        self.chip_more.setText("Altre opzioni ▴" if on else "Altre opzioni ▾")
+        self.opt_card.setVisible(on)
+
+    def _on_log_toggle(self, on: bool) -> None:
+        self.log_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+        self.log_view.setVisible(on)
+
+    # ---------- playbar ----------
+
+    def _on_playbar_seek(self, frac: float) -> None:
+        dur = self.mixer_tab.engine.duration()
+        if dur > 0:
+            self.mixer_tab.seek_seconds(frac * dur)
+
+    def _on_mixer_pos(self, pos: float) -> None:
+        eng = self.mixer_tab.engine
+        self.playbar.set_position(pos, eng.duration())
+        self.playbar.set_playing(eng.is_playing())
+
+    def _on_song_loaded(self, folder: str, duration: float) -> None:
+        name = os.path.basename(folder.rstrip("/\\")) or folder
+        n = len(self.mixer_tab.engine.tracks)
+        self.playbar.set_song(name, f"{n} stem")
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (override Qt)
         super().resizeEvent(event)
-        self._update_responsive()
-
-    def _update_responsive(self) -> None:
-        if not hasattr(self, "body_container"):
-            return
-        self._apply_layout(self.width() < self.NARROW_W)
-
-    def _apply_layout(self, narrow: bool) -> None:
-        """Dispone opzioni/coda/log: due colonne se largo, impilati se stretto."""
-        if narrow == self._narrow:
-            return
-        self._narrow = narrow
-        # stacca i blocchi (il reparent a None li nasconde: niente flash),
-        # poi distruggi il vecchio layout assegnandolo a un widget usa-e-getta
-        for w in (self.opt_card, self.queue_block, self.log_block):
-            w.setParent(None)
-        old = self.body_container.layout()
-        if old is not None:
-            QWidget().setLayout(old)
-        if narrow:
-            lay = QVBoxLayout(self.body_container)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(16)
-            lay.addWidget(self.opt_card, 0)
-            lay.addWidget(self.queue_block, 1)
-            lay.addWidget(self.log_block, 1)
-        else:
-            lay = QHBoxLayout(self.body_container)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(18)
-            left = QVBoxLayout()
-            left.setContentsMargins(0, 0, 0, 0)
-            left.setSpacing(16)
-            left.addWidget(self.opt_card, 0)
-            left.addWidget(self.log_block, 1)
-            lay.addLayout(left, 3)
-            lay.addWidget(self.queue_block, 2)
+        from .toast import Toast
+        Toast._reposition(self)
 
     # ---------- settings <-> UI ----------
 
@@ -1043,6 +1091,7 @@ class MainWindow(QWidget):
             self.tpl_combo.setCurrentIndex(idx)
         self._on_format_changed(self.fmt_combo.currentText())
         self._refresh_ytdlp_label()
+        self._refresh_chips()
 
     def _refresh_ytdlp_label(self) -> None:
         self.ytdlp_lbl.setText(f"yt-dlp {updater.current_version()}")
@@ -1108,6 +1157,7 @@ class MainWindow(QWidget):
     # ---------- ricerca video ----------
 
     def _start_search(self, query: str) -> None:
+        self._stop_preview()
         self._search_query = query
         self.search_panel.show()
         self.search_label.setText(f"Ricerca di “{query}”…")
@@ -1149,6 +1199,7 @@ class MainWindow(QWidget):
         url = item.data(Qt.ItemDataRole.UserRole)
         if not url:
             return
+        self._stop_preview()
         added = self._add_item(url)
         if added is not None:
             self._log(f"+ {item.text().split('  ·  ')[0]}")
@@ -1156,9 +1207,68 @@ class MainWindow(QWidget):
         item.setText("✓ " + item.text().lstrip("✓ "))
 
     def _close_search(self) -> None:
+        self._stop_preview()
         self._search_query = ""
         self.search_list.clear()
         self.search_panel.hide()
+
+    # ---------- anteprima audio risultati ricerca ----------
+
+    def _on_search_preview(self, item: QListWidgetItem) -> None:
+        url = item.data(Qt.ItemDataRole.UserRole)
+        if not url:
+            return
+        if self._preview_url == url and self._preview_player.is_playing():
+            self._stop_preview()
+            return
+        self._stop_preview()
+        self._preview_url = url
+        self._preview_title = item.text().split("  ·  ")[0].lstrip("✓ ")
+        self.preview_lbl.setText(f"Caricamento anteprima: {self._preview_title}…")
+        self.preview_lbl.show()
+        self.preview_btn.setIcon(icons.icon("clock", theme.COLORS["muted"], 14))
+        self.preview_btn.show()
+        run_preview_task(PreviewTask(url, self._preview_signals))
+
+    def _on_preview_ready(self, url: str, ok: bool, path_or_err: str) -> None:
+        if url != self._preview_url:
+            # anteprima superata da una più recente/chiusa: scarta il file scaricato
+            if ok and path_or_err:
+                try:
+                    os.remove(path_or_err)
+                except OSError:
+                    pass
+            return
+        if not ok:
+            self.preview_lbl.hide()
+            self.preview_btn.hide()
+            self._preview_url = ""
+            toast(self, f"Anteprima non disponibile: {path_or_err}", "warn")
+            return
+        try:
+            self._preview_player.load(path_or_err)
+            self._preview_player.play()
+        except Exception as e:  # noqa: BLE001
+            self.preview_lbl.hide()
+            self.preview_btn.hide()
+            self._preview_url = ""
+            toast(self, f"Errore riproduzione anteprima: {e}", "error")
+            return
+        self._preview_path = path_or_err
+        self.preview_lbl.setText(f"▶ {self._preview_title}")
+        self.preview_btn.setIcon(icons.icon("x", theme.COLORS["muted"], 12))
+
+    def _stop_preview(self) -> None:
+        self._preview_player.stop()
+        if self._preview_path:
+            try:
+                os.remove(self._preview_path)
+            except OSError:
+                pass
+        self._preview_path = ""
+        self._preview_url = ""
+        self.preview_lbl.hide()
+        self.preview_btn.hide()
 
     def _on_load_file(self) -> None:
         """Aggiunge alla coda uno o più file audio locali già scaricati."""
@@ -1282,20 +1392,17 @@ class MainWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
-    def _on_tab_changed(self, index: int) -> None:
-        """Mostra le azioni del mixer solo sulla scheda Mixer."""
-        self.mixer_tab.actions_host.setVisible(index == self._mixer_index)
-
     def _show_about(self) -> None:
         box = QMessageBox(self)
         box.setWindowTitle("Informazioni su Sonora")
         box.setTextFormat(Qt.TextFormat.RichText)
+        muted = theme.COLORS["muted"]
         box.setText(
-            f"<h2 style='margin:0'>Sonora <span style='color:#8b90a0'>v{__version__}</span></h2>"
-            "<p style='margin:2px 0 10px 0; color:#8b90a0'>di <b>Pisco Factory</b></p>"
+            f"<h2 style='margin:0'>Sonora <span style='color:{muted}'>v{__version__}</span></h2>"
+            f"<p style='margin:2px 0 10px 0; color:{muted}'>di <b>Pisco Factory</b></p>"
             "<p>Scarica, separa in stem ed esercitati sui brani: slow-down a tono "
             "invariato, loop, EQ, rilevamento accordi e accordatore — tutto in locale.</p>"
-            "<p style='color:#8b90a0; font-size:11px'>© 2026 Pisco Factory. Tutti i diritti riservati.</p>")
+            f"<p style='color:{muted}; font-size:11px'>© 2026 Pisco Factory. Tutti i diritti riservati.</p>")
         box.setInformativeText(
             "Costruito con software open source: yt-dlp, Demucs (Meta AI), "
             "audio-separator / BS-RoFormer, PySide6 (Qt), NumPy, soundfile, sounddevice.\n\n"
@@ -1344,12 +1451,11 @@ class MainWindow(QWidget):
         verbose = self._appchk_verbose
         if info is None:
             if verbose:
-                QMessageBox.warning(self, "Aggiornamenti",
-                                    "Impossibile controllare gli aggiornamenti.")
+                toast(self, "Impossibile controllare gli aggiornamenti.", "error")
             return
         if not info.get("newer"):
             if verbose:
-                QMessageBox.information(self, "Aggiornamenti", "Sonora è aggiornata.")
+                toast(self, "Sonora è aggiornata. ✓", "ok")
             return
         if info.get("download_url"):
             r = QMessageBox.question(
@@ -1372,20 +1478,13 @@ class MainWindow(QWidget):
         if self._appupd_thread and self._appupd_thread.isRunning():
             return
         self._log(f"— scarico aggiornamento {info['version']} —")
-        self._appupd_progress = QProgressDialog(
-            "Scarico l'aggiornamento…", "", 0, 100, self)
-        self._appupd_progress.setWindowTitle("Aggiornamento Sonora")
-        self._appupd_progress.setWindowModality(Qt.WindowModality.WindowModal)
-        self._appupd_progress.setCancelButton(None)   # download non interrompibile
-        self._appupd_progress.setMinimumDuration(0)
-        self._appupd_progress.setAutoClose(False)
-        self._appupd_progress.setAutoReset(False)
-        self._appupd_progress.setValue(0)
+        self.playbar.task_update(f"Aggiornamento {info['version']}…", 0.0)
         self._appupd_thread, self._appupd_worker = app_update.make_download_thread(
             info["download_url"], info.get("asset_name", ""),
             info.get("sha256_url", ""))
         self._appupd_worker.progress.connect(
-            lambda p: self._appupd_progress and self._appupd_progress.setValue(int(p)))
+            lambda p: self.playbar.task_update(
+                f"Aggiornamento {info['version']}…", float(p)))
         self._appupd_worker.log.connect(self._log)
         self._appupd_worker.finished.connect(self._on_update_downloaded)
         self._appupd_thread.finished.connect(self._cleanup_appupd_thread)
@@ -1396,20 +1495,17 @@ class MainWindow(QWidget):
         self._appupd_worker = None
 
     def _on_update_downloaded(self, ok: bool, path_or_err: str) -> None:
-        if self._appupd_progress is not None:
-            self._appupd_progress.close()
-            self._appupd_progress = None
+        self.playbar.task_done()
         if not ok:
             self._log(f"✖ download aggiornamento fallito: {path_or_err}")
-            QMessageBox.warning(self, "Aggiornamento fallito", path_or_err)
+            toast(self, f"Aggiornamento fallito: {path_or_err}", "error")
             return
         if app_update.launch_installer(path_or_err):
             self._log("Avvio installer, chiudo Sonora…")
             self._really_quit = True
             QApplication.quit()
         else:
-            QMessageBox.warning(self, "Aggiornamento",
-                                "Impossibile avviare l'installer scaricato.")
+            toast(self, "Impossibile avviare l'installer scaricato.", "error")
 
     def _setup_clipboard_watch(self) -> None:
         self._clip = QApplication.clipboard()
@@ -1546,7 +1642,7 @@ class MainWindow(QWidget):
     def _open_in_mixer(self, stems_dir: str) -> None:
         if not stems_dir or not os.path.isdir(stems_dir):
             return
-        self.tabs.setCurrentWidget(self.mixer_tab)
+        self.rail.select(self._mixer_index)
         self.mixer_tab.load_folder(stems_dir)
 
     # ---------- separazione stem ----------
@@ -1577,8 +1673,7 @@ class MainWindow(QWidget):
         ready = [it for it in self.queue
                  if it.extra.get("filepath") and os.path.exists(it.extra["filepath"])]
         if not ready:
-            QMessageBox.information(self, "Niente da separare",
-                                    "Nessun brano scaricato/file pronto in coda.")
+            toast(self, "Nessun brano scaricato o file pronto in coda.", "warn")
             return
         items = [it for it in ready
                  if not (it.extra.get("stems_dir")
@@ -1595,12 +1690,12 @@ class MainWindow(QWidget):
 
     def _start_stem_batch(self, items: list[QueueItem]) -> None:
         if self._busy():
-            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            toast(self, "Aspetta la fine dell'operazione in corso.", "warn")
             return
         items = [it for it in items
                  if it.extra.get("filepath") and os.path.exists(it.extra["filepath"])]
         if not items:
-            QMessageBox.warning(self, "File mancante", "Nessun file valido da separare.")
+            toast(self, "Nessun file valido da separare.", "error")
             return
 
         # primo uso: serve installare il motore (~3GB)
@@ -1640,28 +1735,44 @@ class MainWindow(QWidget):
 
     def _set_stem_running(self, running: bool) -> None:
         self.download_btn.setEnabled(not running)
-        self.download_btn.setText("⬇  Scarica")
+        self.download_btn.setText("Scarica")
         self.stop_btn.setEnabled(running)
         self.stop_btn.setText("Stop")
         self.stem_file_btn.setEnabled(not running)
         self.stem_all_btn.setEnabled(not running)
-        self.engine_btn.setEnabled(not running)
-        self.engine_opts_btn.setEnabled(not running)
+        sp = self.settings_page
+        for b in (sp.engine_btn, sp.verify_btn, sp.uninstall_btn, sp.location_btn):
+            b.setEnabled(not running)
         self.clear_btn.setEnabled(not running)
         self.retry_btn.setEnabled(not running)
+        tip = "Operazione in corso…" if running else ""
+        for b in (self.stem_all_btn, self.stem_file_btn):
+            if running:
+                b.setToolTip(tip)
+        if not running:
+            self.stem_all_btn.setToolTip("Separa in stem tutti i brani pronti in coda.")
+            self.stem_file_btn.setToolTip("Scegli un file audio locale da separare in stem.")
+            self.playbar.task_done()
 
     def _on_stem_status(self, phase: str) -> None:
-        if not self._stem_row:
-            return
         if phase == "motore":
             label, detail = "motore…", "preparo il motore (una volta)…"
+            self._stem_task = "Installazione motore"
         elif phase == "analisi":
             label, detail = "analisi…", "BPM, tonalità, beat…"
+            self._stem_task = "Analisi"
         else:
             label, detail = "stem", "separazione…"
-        self._stem_row.update_progress(self._stem_row.item.progress, label, detail)
+            title = (self._stem_row.item.title or "") if self._stem_row else ""
+            self._stem_task = ("Separazione stem · " + title).rstrip(" ·")
+        # chip attività globale sulla playbar (visibile da ogni schermata)
+        self.playbar.task_update(self._stem_task, None, cancellable=True)
+        if self._stem_row:
+            self._stem_row.update_progress(self._stem_row.item.progress, label, detail)
 
     def _on_stem_progress(self, pct: float) -> None:
+        task = getattr(self, "_stem_task", "Elaborazione…")
+        self.playbar.task_update(task, pct, cancellable=True)
         if self._stem_row:
             status = self._stem_row.item.status or "stem"
             self._stem_row.update_progress(pct, status, "")
@@ -1719,10 +1830,13 @@ class MainWindow(QWidget):
                                  else "Motore stem: non installato") + where)
         self.engine_lbl.setToolTip(f"Cartella motore: {stems.engine_dir()}")
         self.engine_btn.setText("Reinstalla motore" if ready else "Installa motore")
+        # banner inline nella pagina Scarica: visibile finché il motore manca
+        if hasattr(self, "engine_banner"):
+            self.engine_banner.setVisible(not ready)
 
     def _on_install_engine(self) -> None:
         if self._busy():
-            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            toast(self, "Aspetta la fine dell'operazione in corso.", "warn")
             return
         ready = stems.engine_ready()
         q = ("Reinstallare il motore stem (~3 GB)?" if ready
@@ -1743,10 +1857,10 @@ class MainWindow(QWidget):
 
     def _on_uninstall_engine(self) -> None:
         if self._busy():
-            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            toast(self, "Aspetta la fine dell'operazione in corso.", "warn")
             return
         if not stems.engine_ready() and not stems.engine_dir().exists():
-            QMessageBox.information(self, "Motore stem", "Il motore non è installato.")
+            toast(self, "Il motore non è installato.", "info")
             return
         q = ("Disinstallare il motore stem?\n\n"
              f"Verrà rimossa la cartella:\n{stems.engine_dir()}\n\n"
@@ -1754,8 +1868,7 @@ class MainWindow(QWidget):
         if QMessageBox.question(self, "Disinstalla motore", q) != QMessageBox.StandardButton.Yes:
             return
         self._set_stem_running(True)
-        self.engine_btn.setEnabled(False)
-        self.engine_opts_btn.setEnabled(False)
+        self.playbar.task_update("Disinstallazione motore…")
         self._log("— disinstallazione motore —")
         self._uninst_thread, self._uninst_worker = make_uninstall_thread()
         self._uninst_worker.log.connect(self._log)
@@ -1766,29 +1879,25 @@ class MainWindow(QWidget):
     def _on_uninstall_finished(self, ok: bool) -> None:
         self._log("✔ motore disinstallato" if ok else "✖ disinstallazione non completata")
         if not ok:
-            QMessageBox.warning(self, "Disinstalla motore",
-                                "Non è stato possibile rimuovere tutto.\n"
-                                "Chiudi eventuali processi del motore e riprova.")
+            toast(self, "Non è stato possibile rimuovere tutto: chiudi eventuali "
+                        "processi del motore e riprova.", "error")
         self._refresh_engine_label()
 
     def _after_uninstall_thread(self) -> None:
         self._uninst_thread = None
         self._uninst_worker = None
-        self.engine_btn.setEnabled(True)
-        self.engine_opts_btn.setEnabled(True)
         self._set_stem_running(False)
 
     def _on_verify_engine(self) -> None:
         if self._busy():
-            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            toast(self, "Aspetta la fine dell'operazione in corso.", "warn")
             return
         if not stems.venv_python().exists():
-            QMessageBox.information(
-                self, "Motore stem",
-                "Il motore non è installato. Premi «Installa motore».")
+            toast(self, "Il motore non è installato: premi «Installa motore».", "info")
             return
         self._set_stem_running(True)
         self._stem_row = None
+        self.playbar.task_update("Verifica motore…")
         self._log("— verifica / riparazione motore —")
         self._verify_thread, self._verify_worker = make_verify_thread()
         self._verify_worker.progress.connect(self._on_stem_progress)
@@ -1801,11 +1910,10 @@ class MainWindow(QWidget):
         self._log("✔ motore verificato/riparato" if ok else "✖ verifica motore fallita")
         self._refresh_engine_label()
         if ok:
-            QMessageBox.information(self, "Motore stem", "Il motore è a posto e pronto all'uso. ✓")
+            toast(self, "Il motore è a posto e pronto all'uso. ✓", "ok")
         else:
-            QMessageBox.warning(self, "Motore stem",
-                                "Verifica/riparazione non riuscita. Controlla il log; "
-                                "in alternativa disinstalla e reinstalla il motore.")
+            toast(self, "Verifica non riuscita: controlla il log, oppure "
+                        "disinstalla e reinstalla il motore.", "error")
 
     def _after_verify_thread(self) -> None:
         self._verify_thread = None
@@ -1814,7 +1922,7 @@ class MainWindow(QWidget):
 
     def _on_change_engine_location(self) -> None:
         if self._busy():
-            QMessageBox.information(self, "Occupato", "Aspetta la fine dell'operazione in corso.")
+            toast(self, "Aspetta la fine dell'operazione in corso.", "warn")
             return
         current = (self.cfg.get("stem_engine_dir") or "").strip()
         start = current or str(config.config_dir())
@@ -1842,9 +1950,8 @@ class MainWindow(QWidget):
                 self._log("✔ vecchio motore rimosso" if ok
                           else "✖ rimozione vecchio motore non completata")
         if not stems.engine_ready():
-            QMessageBox.information(
-                self, "Motore stem",
-                "Percorso aggiornato. Premi «Installa motore» per installarlo nella nuova cartella.")
+            toast(self, "Percorso aggiornato: premi «Installa motore» per "
+                        "installarlo nella nuova cartella.", "info")
 
     # ---------- aggiornamento yt-dlp ----------
 
@@ -1864,10 +1971,7 @@ class MainWindow(QWidget):
         self.update_btn.setEnabled(True)
         self.update_btn.setText("Aggiorna yt-dlp")
         self._log(("✔ " if ok else "✖ ") + msg)
-        if ok:
-            QMessageBox.information(self, "yt-dlp aggiornato", msg)
-        else:
-            QMessageBox.warning(self, "Aggiornamento fallito", msg)
+        toast(self, msg, "ok" if ok else "error")
 
     def _cleanup_update_thread(self) -> None:
         self._upd_thread = None
@@ -1882,12 +1986,12 @@ class MainWindow(QWidget):
         if not self.queue and self.url_edit.text().strip():
             self._on_add()
         if not self.queue:
-            QMessageBox.information(self, "Coda vuota", "Aggiungi almeno un link.")
+            toast(self, "Aggiungi almeno un link alla coda.", "info")
             return
         # riprocessa solo gli item non ancora completati
         pending = [it for it in self.queue if it.status != "fatto"]
         if not pending:
-            QMessageBox.information(self, "Nulla da fare", "Tutti gli elementi sono gia' completati.")
+            toast(self, "Tutti gli elementi sono già completati. ✓", "ok")
             return
         self._start_download(pending)
 
@@ -1896,7 +2000,7 @@ class MainWindow(QWidget):
             return
         dest = self.dest_edit.text().strip()
         if not dest or not os.path.isdir(dest):
-            QMessageBox.warning(self, "Cartella mancante", "Scegli una cartella di destinazione valida.")
+            toast(self, "Scegli una cartella di destinazione valida.", "error")
             return
 
         self._persist()
@@ -1948,13 +2052,13 @@ class MainWindow(QWidget):
             return
         failed = [it for it in self.queue if it.status == "errore"]
         if not failed:
-            QMessageBox.information(self, "Niente da riprovare", "Nessun download fallito.")
+            toast(self, "Nessun download fallito da riprovare.", "info")
             return
         self._start_download(failed)
 
     def _set_running(self, running: bool) -> None:
         self.download_btn.setEnabled(not running)
-        self.download_btn.setText("Scaricando…" if running else "⬇  Scarica")
+        self.download_btn.setText("Scaricando…" if running else "Scarica")
         self.stop_btn.setEnabled(running)
         self.stop_btn.setText("Stop")
         self.clear_btn.setEnabled(not running)
@@ -2024,6 +2128,7 @@ class MainWindow(QWidget):
             self.mixer_tab.shutdown()
         except Exception:  # noqa: BLE001
             pass
+        self._stop_preview()
         if self._upd_thread and self._upd_thread.isRunning():
             self._upd_thread.quit()
             self._upd_thread.wait(3000)

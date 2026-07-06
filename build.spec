@@ -60,10 +60,11 @@ datas += [
     (str(project / "app" / "roformer_script.py"), "app_scripts"),
 ]
 
-# includi tutti i file in resources/ (qss, svg, ico)
-for res in (project / "resources").iterdir():
+# includi tutti i file in resources/, incluse le sottocartelle (es. icons/)
+for res in (project / "resources").rglob("*"):
     if res.is_file():
-        datas.append((str(res), "resources"))
+        rel_dir = res.parent.relative_to(project)
+        datas.append((str(res), str(rel_dir)))
 
 # DLL native delle librerie audio (libsndfile / portaudio)
 binaries = []

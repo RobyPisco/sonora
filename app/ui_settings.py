@@ -183,7 +183,14 @@ class SettingsPage(QWidget):
         self.location_btn.setObjectName("Ghost")
         self.location_btn.setToolTip("Cambia la cartella di installazione del motore.")
         self.location_btn.clicked.connect(self._main._on_change_engine_location)
-        for b in (self.engine_btn, self.verify_btn, self.uninstall_btn, self.location_btn):
+        self.diag_btn = QPushButton("Esporta diagnostica")
+        self.diag_btn.setObjectName("Ghost")
+        self.diag_btn.setToolTip(
+            "Crea sul Desktop uno zip con versione, GPU, stato del motore,\n"
+            "impostazioni e log recenti: allegalo quando chiedi assistenza.")
+        self.diag_btn.clicked.connect(self._main._on_export_diagnostics)
+        for b in (self.engine_btn, self.verify_btn, self.uninstall_btn,
+                  self.location_btn, self.diag_btn):
             btns.addWidget(b)
         btns.addStretch(1)
         lay.addLayout(btns)

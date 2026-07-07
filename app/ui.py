@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, app_update, changelog, config, history, icons, paths, stems, theme, updater
+from . import __version__, app_update, changelog, config, diagnostics, history, icons, paths, stems, theme, updater
 from .toast import Banner, toast
 from .ui_playbar import PlayBar
 from .ui_settings import UI_SCALES, SettingsPage
@@ -183,6 +183,30 @@ class EngineVerifyWorker(QObject):
 def make_verify_thread() -> tuple[QThread, EngineVerifyWorker]:
     thread = QThread()
     worker = EngineVerifyWorker()
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    return thread, worker
+
+
+class DiagnosticsWorker(QObject):
+    """Crea lo zip di diagnostica in un QThread (nvidia-smi può richiedere
+    qualche secondo: evita di bloccare l'interfaccia)."""
+
+    finished = Signal(bool, str)   # ok, percorso zip o messaggio errore
+
+    def run(self) -> None:
+        try:
+            out = diagnostics.export_zip()
+            self.finished.emit(True, str(out))
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("sonora").exception("esporta diagnostica fallita")
+            self.finished.emit(False, str(exc).splitlines()[0] if str(exc) else "errore")
+
+
+def make_diagnostics_thread() -> tuple[QThread, DiagnosticsWorker]:
+    thread = QThread()
+    worker = DiagnosticsWorker()
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     worker.finished.connect(thread.quit)
@@ -436,6 +460,8 @@ class MainWindow(QWidget):
         self._uninst_worker: EngineUninstallWorker | None = None
         self._verify_thread: QThread | None = None
         self._verify_worker: EngineVerifyWorker | None = None
+        self._diag_thread: QThread | None = None
+        self._diag_worker: DiagnosticsWorker | None = None
         self._stem_row: QueueRow | None = None
         self._stem_batch: list[QueueItem] = []
         self._stem_cancel_batch = False
@@ -2027,6 +2053,33 @@ class MainWindow(QWidget):
         if not stems.engine_ready():
             toast(self, "Percorso aggiornato: premi «Installa motore» per "
                         "installarlo nella nuova cartella.", "info")
+
+    def _on_export_diagnostics(self) -> None:
+        if self._diag_thread and self._diag_thread.isRunning():
+            return
+        self.settings_page.diag_btn.setEnabled(False)
+        self.settings_page.diag_btn.setText("Esporto…")
+        self._log("— esporta diagnostica —")
+        self._diag_thread, self._diag_worker = make_diagnostics_thread()
+        self._diag_worker.finished.connect(self._on_diagnostics_finished)
+        self._diag_thread.finished.connect(self._after_diag_thread)
+        self._diag_thread.start()
+
+    def _on_diagnostics_finished(self, ok: bool, result: str) -> None:
+        if ok:
+            self._log(f"✔ diagnostica esportata: {result}")
+            toast(self, "Diagnostica esportata sul Desktop: allega lo zip "
+                        "quando chiedi assistenza.", "ok")
+            self._open_path(os.path.dirname(result))
+        else:
+            self._log(f"✖ esporta diagnostica fallita: {result}")
+            toast(self, f"Esportazione non riuscita: {result}", "error")
+
+    def _after_diag_thread(self) -> None:
+        self._diag_thread = None
+        self._diag_worker = None
+        self.settings_page.diag_btn.setEnabled(True)
+        self.settings_page.diag_btn.setText("Esporta diagnostica")
 
     # ---------- aggiornamento yt-dlp ----------
 

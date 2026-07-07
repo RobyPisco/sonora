@@ -12,6 +12,22 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.8.0", [
+        "Punti del brano con nome nel Mixer (gruppo «PUNTI»): salva un "
+        "marcatore al punto in cui sei o l'intero loop A-B («assolo», "
+        "«bridge difficile»…), rivedili come bandierine sulla timeline e "
+        "richiamali con un click o con Ctrl+1…9. Restano salvati per brano: "
+        "riapri il pezzo e i tuoi punti di lavoro sono ancora lì.",
+        "Preset di mix (pulsante «Preset» nel Mixer): Karaoke, Senza basso, "
+        "Senza batteria, Solo ritmica, Voce guida… e puoi salvare il tuo mix "
+        "come preset personale da riusare su qualsiasi brano.",
+        "Scalette (pulsante «Scalette» nel Mixer): raggruppa i brani per le "
+        "prove o il repertorio e scorrili in sequenza con Ctrl+→ / Ctrl+←; "
+        "ogni brano si apre già con il suo mix salvato.",
+        "Nuovo pulsante «Esporta diagnostica» (Impostazioni → Motore stem): "
+        "crea sul Desktop uno zip con le informazioni utili all'assistenza "
+        "da allegare quando chiedi aiuto.",
+    ]),
     ("1.7.3", [
         "«Separa tutti» non chiede più di rifare i brani già separati: "
         "lavora solo sui nuovi e salta gli altri. Per rifarne uno c'è il "

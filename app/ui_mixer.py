@@ -20,8 +20,10 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollBar,
@@ -33,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from . import config, history, icons, paths, stems, theme
+from . import config, history, icons, mix_presets, paths, setlists, stems, theme
 from .flowlayout import FlowLayout
 from .toast import toast
 from .mixer_engine import MixerEngine
@@ -340,6 +342,7 @@ class TimelineWidget(QWidget):
         self._beats = []
         self._duration = 0.0
         self._progress = 0.0
+        self._marks: list[tuple[float, str, bool]] = []   # (frazione, nome, è_loop)
         self.setFixedHeight(24)
 
     def set_view(self, start: float, end: float) -> None:
@@ -354,6 +357,11 @@ class TimelineWidget(QWidget):
     def set_data(self, beats: list[float], duration: float) -> None:
         self._beats = list(beats or [])
         self._duration = duration
+        self.update()
+
+    def set_marks(self, marks: list[tuple[float, str, bool]]) -> None:
+        """Punti nominati da mostrare come bandierine: (frazione, nome, è_loop)."""
+        self._marks = list(marks or [])
         self.update()
 
     def _span(self) -> float:
@@ -486,6 +494,23 @@ class TimelineWidget(QWidget):
                     lbl = f"{int(t)}s" if t < 60 else f"{int(t)//60}:{int(t)%60:02d}"
                     p.drawText(bx - 20, h - 18, 40, 10, Qt.AlignmentFlag.AlignCenter, lbl)
                 t += step_sec
+
+        # bandierine dei punti nominati (sopra i tick, sotto il playhead)
+        if self._marks:
+            p.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            for fr, name, is_loop in self._marks:
+                if not (vs <= fr <= ve):
+                    continue
+                mx = self._x_of(fr)
+                color = QColor(theme.COLORS["ok"] if is_loop
+                               else theme.COLORS["accent"])
+                p.setPen(QPen(color, 1.5))
+                p.drawLine(mx, 0, mx, h - 1)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(color)
+                p.drawPolygon([QPoint(mx, 1), QPoint(mx + 7, 4), QPoint(mx, 8)])
+                p.setPen(QPen(color, 1))
+                p.drawText(mx + 9, 10, name[:24])
 
         # playhead
         px = self._x_of(self._progress)
@@ -767,6 +792,11 @@ class MixerTab(QWidget):
         self._xform_cache: dict[tuple[float, int], object] = {}
         self._loop_a: float | None = None
         self._loop_b: float | None = None
+        # punti nominati del brano: [{"name", "a" (0..1), "b" (0..1 | None)}]
+        self._marks: list[dict] = []
+        # scaletta attiva (se il brano corrente è stato caricato da una scaletta)
+        self._setlist_name: str | None = None
+        self._setlist_pos = -1
         # zoom waveform: finestra di vista globale [start, end] condivisa fra le tracce
         self._view: list[float] = [0.0, 1.0]
         # beat grid: frazioni dei beat correnti (per mostrarle/nasconderle)
@@ -801,6 +831,10 @@ class MixerTab(QWidget):
         for i in range(6):
             sc(str(i + 1), lambda i=i: self._toggle_track_mute(i))
             sc(f"Shift+{i + 1}", lambda i=i: self._toggle_track_solo(i))
+        for i in range(9):
+            sc(f"Ctrl+{i + 1}", lambda i=i: self._recall_mark(i))
+        sc("Ctrl+Right", lambda: self._setlist_step(+1))
+        sc("Ctrl+Left", lambda: self._setlist_step(-1))
 
     def _toggle_track_mute(self, i: int) -> None:
         if i < len(self.strips):
@@ -846,11 +880,25 @@ class MixerTab(QWidget):
         self.tuner_btn.setIcon(icons.icon("tuner", theme.COLORS["muted"], 15))
         self.tuner_btn.setToolTip("Accordatore: tono di riferimento A440 / corde + accordatore dal microfono.")
         self.tuner_btn.clicked.connect(self._open_tuner)
+        self.preset_btn = QPushButton("Preset")
+        self.preset_btn.setObjectName("Ghost")
+        self.preset_btn.setToolTip(
+            "Preset di mix riusabili su qualsiasi brano: Karaoke, Senza basso…\n"
+            "Puoi salvare il mix corrente come preset personale.")
+        self.preset_btn.clicked.connect(self._show_preset_menu)
+        self.preset_btn.setEnabled(False)
+        self.setlist_btn = QPushButton("Scalette")
+        self.setlist_btn.setObjectName("Ghost")
+        self.setlist_btn.setToolTip(
+            "Scalette: raggruppa i brani e scorrili in sequenza\n"
+            "(Ctrl+→ / Ctrl+← per brano successivo/precedente).")
+        self.setlist_btn.clicked.connect(self._show_setlist_menu)
         self.actions_host = QWidget()
         ah = QHBoxLayout(self.actions_host)
         ah.setContentsMargins(0, 0, 12, 0)
         ah.setSpacing(6)
-        for b in (self.tuner_btn, self.export_btn, self.analyze_btn, self.recent_btn):
+        for b in (self.tuner_btn, self.preset_btn, self.export_btn,
+                  self.analyze_btn, self.setlist_btn, self.recent_btn):
             ah.addWidget(b)
 
         # --- header: titolo brano (sx) + azioni (dx); card di analisi sotto ---
@@ -1046,6 +1094,15 @@ class MixerTab(QWidget):
             "Loop progressivo: parte lento e accelera ad ogni giro fino a 100%.\n"
             "Clicca per configurare e attivare.")
         self.autospeed_btn.clicked.connect(self._show_autospeed)
+        # punti nominati (marcatori / loop salvati)
+        self.marks_btn = QPushButton("Punti")
+        self.marks_btn.setObjectName("GhostMini")
+        self.marks_btn.setMinimumWidth(64)
+        self.marks_btn.setIcon(icons.icon("flag", mut, 13))
+        self.marks_btn.setToolTip(
+            "Punti del brano con nome (marcatori e loop salvati):\n"
+            "salvali una volta, richiamali con un click o con Ctrl+1…9.")
+        self.marks_btn.clicked.connect(self._show_marks_menu)
         # zoom waveform (vista condivisa fra le tracce)
         self.zoomout_btn = QPushButton()
         self.zoomout_btn.setIcon(icons.icon("zoom-out", mut, 13))
@@ -1120,7 +1177,7 @@ class MixerTab(QWidget):
         self.master.valueChanged.connect(lambda v: self.engine.set_master(float(v)))
 
         # altezza uniforme per i pulsantini → allineati ai cursori
-        for _b in (self.a_btn, self.b_btn, self.loop_btn,
+        for _b in (self.a_btn, self.b_btn, self.loop_btn, self.marks_btn,
                    self.loopclr_btn, self.autospeed_btn, self.zoomout_btn,
                    self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
                    self.click_btn, self.steady_btn,
@@ -1165,6 +1222,7 @@ class MixerTab(QWidget):
                                  self.pitch_slider, self.pitch_up_btn))
         groups.addWidget(_tgroup("LOOP", self.a_btn, self.b_btn, self.loop_btn,
                                  self.loopclr_btn, self.autospeed_btn))
+        groups.addWidget(_tgroup("PUNTI", self.marks_btn))
         groups.addWidget(_tgroup("ZOOM", self.zoomout_btn, self.zoomin_btn,
                                  self.zoomfit_btn, self.beatgrid_btn))
         groups.addWidget(_tgroup("CLICK", self.click_btn, self.steady_btn,
@@ -1189,6 +1247,8 @@ class MixerTab(QWidget):
         self.play_btn.setEnabled(loaded)
         self.stop_btn.setEnabled(loaded)
         self.export_btn.setEnabled(loaded)
+        self.preset_btn.setEnabled(loaded)
+        self.marks_btn.setEnabled(loaded)
 
     # ---------- caricamento ----------
 
@@ -1260,6 +1320,8 @@ class MixerTab(QWidget):
         self.loop_btn.setChecked(False)
         self.click_btn.setChecked(False)
         self._beats_ready = False
+        self._marks = []
+        self._refresh_mark_flags()
 
         # analisi: usa la cache se c'è, altrimenti analizza subito da solo
         data = stems.load_analysis(folder)
@@ -1284,6 +1346,10 @@ class MixerTab(QWidget):
                 history.add(os.path.basename(folder), "", "stem", folder)
         except Exception:  # noqa: BLE001
             pass
+
+        # se c'è una scaletta attiva, riallinea la posizione (o disattivala
+        # quando l'utente carica un brano fuori scaletta)
+        self._sync_setlist_state(folder)
 
         self.song_loaded.emit(folder, self.engine.duration())
 
@@ -1553,6 +1619,282 @@ class MixerTab(QWidget):
             else:
                 self.loop_btn.setChecked(True)   # → _on_loop_toggle → _apply_loop
         self.engine.seek(a * self.engine.duration())
+
+    # ---------- punti nominati (marcatori / loop salvati) ----------
+
+    def _refresh_mark_flags(self) -> None:
+        self.timeline.set_marks(
+            [(m["a"], m["name"], m["b"] is not None) for m in self._marks])
+
+    def _show_marks_menu(self) -> None:
+        menu = QMenu(self)
+        menu.addAction("Salva punto al playhead…",
+                       lambda: self._add_mark(loop=False))
+        act = menu.addAction("Salva il loop A-B come punto…",
+                             lambda: self._add_mark(loop=True))
+        act.setEnabled(self._loop_a is not None or self._loop_b is not None)
+        if self._marks:
+            menu.addSeparator()
+            dur = self.engine.duration()
+            for i, m in enumerate(self._marks):
+                kind = "↻" if m["b"] is not None else "⚑"
+                hint = f"\tCtrl+{i + 1}" if i < 9 else ""
+                menu.addAction(f"{kind} {m['name']}   {_fmt_time(m['a'] * dur)}{hint}",
+                               lambda i=i: self._recall_mark(i))
+            rm = menu.addMenu("Elimina punto")
+            for i, m in enumerate(self._marks):
+                rm.addAction(m["name"], lambda i=i: self._delete_mark(i))
+        menu.exec(self.marks_btn.mapToGlobal(self.marks_btn.rect().bottomLeft()))
+
+    def _add_mark(self, loop: bool) -> None:
+        if loop:
+            a = self._loop_a if self._loop_a is not None else 0.0
+            b = self._loop_b if self._loop_b is not None else 1.0
+            if b < a:
+                a, b = b, a
+            default = f"Loop {sum(1 for m in self._marks if m['b'] is not None) + 1}"
+        else:
+            dur = self.engine.duration()
+            a = (self.engine.position() / dur) if dur else 0.0
+            b = None
+            default = f"Punto {sum(1 for m in self._marks if m['b'] is None) + 1}"
+        name, ok = QInputDialog.getText(self, "Nome del punto", "Nome:", text=default)
+        name = name.strip()
+        if not ok or not name:
+            return
+        self._marks.append({"name": name[:40], "a": a, "b": b})
+        self._marks.sort(key=lambda m: m["a"])
+        self._refresh_mark_flags()
+        self._save_session()
+
+    def _recall_mark(self, i: int) -> None:
+        if not (0 <= i < len(self._marks)):
+            return
+        m = self._marks[i]
+        if m["b"] is not None:
+            self._loop_a, self._loop_b = m["a"], m["b"]
+            if not self.loop_btn.isChecked():
+                self.loop_btn.setChecked(True)   # → _on_loop_toggle → _apply_loop
+            else:
+                self._apply_loop()
+        self.engine.seek(m["a"] * self.engine.duration())
+
+    def _delete_mark(self, i: int) -> None:
+        if 0 <= i < len(self._marks):
+            del self._marks[i]
+            self._refresh_mark_flags()
+            self._save_session()
+
+    # ---------- preset di mix ----------
+
+    def _show_preset_menu(self) -> None:
+        menu = QMenu(self)
+        for name in mix_presets.builtin_names():
+            menu.addAction(name, lambda n=name: self._apply_preset(
+                mix_presets.builtin_overrides(n) or {}, n))
+        user = mix_presets.load_user()
+        if user:
+            menu.addSeparator()
+            for name, ov in sorted(user.items(), key=lambda kv: kv[0].lower()):
+                menu.addAction(f"★ {name}",
+                               lambda n=name, o=ov: self._apply_preset(o, n))
+        menu.addSeparator()
+        menu.addAction("Salva il mix corrente come preset…", self._save_preset)
+        if user:
+            rm = menu.addMenu("Elimina preset")
+            for name in sorted(user, key=str.lower):
+                rm.addAction(name, lambda n=name: self._delete_preset(n))
+        menu.exec(self.preset_btn.mapToGlobal(self.preset_btn.rect().bottomLeft()))
+
+    def _apply_preset(self, overrides: dict, name: str) -> None:
+        if not self.strips:
+            return
+        states = mix_presets.states_for(overrides, [s.name for s in self.strips])
+        for s in self.strips:
+            s.apply_state(states[s.name])
+        self._save_session()
+        toast(self, f"Preset «{name}» applicato.", "ok")
+
+    def _save_preset(self) -> None:
+        name, ok = QInputDialog.getText(self, "Salva preset", "Nome del preset:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in mix_presets.builtin_names():
+            toast(self, "Questo nome è riservato a un preset predefinito.", "warn")
+            return
+        user = mix_presets.load_user()
+        if name in user and QMessageBox.question(
+                self, "Preset esistente",
+                f"«{name}» esiste già: sovrascriverlo?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        user[name] = {s.name: s.state() for s in self.strips}
+        mix_presets.save_user(user)
+        toast(self, f"Preset «{name}» salvato: lo ritrovi nel menu Preset "
+                    "su qualsiasi brano.", "ok")
+
+    def _delete_preset(self, name: str) -> None:
+        user = mix_presets.load_user()
+        if user.pop(name, None) is not None:
+            mix_presets.save_user(user)
+            toast(self, f"Preset «{name}» eliminato.", "info")
+
+    # ---------- scalette (setlist) ----------
+
+    def _refresh_setlist_btn(self) -> None:
+        n = 0
+        if self._setlist_name:
+            e = setlists.find(setlists.load(), self._setlist_name)
+            n = len(e["folders"]) if e else 0
+        self.setlist_btn.setText(
+            f"Scaletta {self._setlist_pos + 1}/{n}" if n else "Scalette")
+
+    def _show_setlist_menu(self) -> None:
+        data = setlists.load()
+        menu = QMenu(self)
+        if self._setlist_name:
+            e = setlists.find(data, self._setlist_name)
+            n = len(e["folders"]) if e else 0
+            nxt = menu.addAction("Brano successivo\tCtrl+→",
+                                 lambda: self._setlist_step(+1))
+            prv = menu.addAction("Brano precedente\tCtrl+←",
+                                 lambda: self._setlist_step(-1))
+            nxt.setEnabled(self._setlist_pos + 1 < n)
+            prv.setEnabled(self._setlist_pos > 0)
+            menu.addSeparator()
+        for e in data:
+            sub = menu.addMenu(f"{e['name']}  ({len(e['folders'])})")
+            for i, folder in enumerate(e["folders"]):
+                base = os.path.basename(folder.rstrip("/\\")) or folder
+                act = sub.addAction(f"{i + 1}.  {base}",
+                                    lambda n=e["name"], i=i: self._setlist_load(n, i))
+                if e["name"] == self._setlist_name and i == self._setlist_pos:
+                    act.setCheckable(True)
+                    act.setChecked(True)
+            if not e["folders"]:
+                empty = sub.addAction("(vuota)")
+                empty.setEnabled(False)
+            sub.addSeparator()
+            add = sub.addAction("Aggiungi il brano corrente",
+                                lambda n=e["name"]: self._setlist_add_current(n))
+            add.setEnabled(bool(self._folder) and self._folder not in e["folders"])
+            if self._folder and self._folder in e["folders"]:
+                sub.addAction("Rimuovi il brano corrente",
+                              lambda n=e["name"]: self._setlist_remove_current(n))
+            sub.addAction("Rinomina…", lambda n=e["name"]: self._setlist_rename(n))
+            sub.addAction("Elimina scaletta",
+                          lambda n=e["name"]: self._setlist_delete(n))
+        if data:
+            menu.addSeparator()
+        menu.addAction("Nuova scaletta…", self._setlist_new)
+        menu.exec(self.setlist_btn.mapToGlobal(self.setlist_btn.rect().bottomLeft()))
+
+    def _setlist_load(self, name: str, idx: int) -> None:
+        e = setlists.find(setlists.load(), name)
+        if not e or not (0 <= idx < len(e["folders"])):
+            return
+        folder = e["folders"][idx]
+        if not os.path.isdir(folder):
+            toast(self, "Cartella non trovata (spostata o rinominata?):\n"
+                        f"{folder}", "warn")
+            return
+        # prima dello stato, così _sync_setlist_state (in load_folder) conferma
+        self._setlist_name = name
+        self._setlist_pos = idx
+        self.load_folder(folder)
+
+    def _setlist_step(self, delta: int) -> None:
+        if not self._setlist_name:
+            return
+        e = setlists.find(setlists.load(), self._setlist_name)
+        if not e:
+            return
+        idx = self._setlist_pos + delta
+        if not (0 <= idx < len(e["folders"])):
+            toast(self, "Inizio della scaletta." if delta < 0
+                        else "Fine della scaletta.", "info")
+            return
+        self._setlist_load(self._setlist_name, idx)
+
+    def _sync_setlist_state(self, folder: str) -> None:
+        """Dopo un load_folder: aggiorna posizione nella scaletta attiva, o
+        disattivala se il brano caricato non ne fa parte."""
+        if not self._setlist_name:
+            return
+        e = setlists.find(setlists.load(), self._setlist_name)
+        if e and folder in e["folders"]:
+            self._setlist_pos = e["folders"].index(folder)
+        else:
+            self._setlist_name = None
+            self._setlist_pos = -1
+        self._refresh_setlist_btn()
+
+    def _setlist_new(self) -> None:
+        name, ok = QInputDialog.getText(self, "Nuova scaletta",
+                                        "Nome della scaletta:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        data = setlists.load()
+        if not setlists.create(data, name):
+            toast(self, "Esiste già una scaletta con questo nome.", "warn")
+            return
+        if self._folder:
+            setlists.add_folder(data, name, self._folder)
+        setlists.save(data)
+        toast(self, f"Scaletta «{name}» creata"
+              + (" con il brano corrente." if self._folder else "."), "ok")
+
+    def _setlist_add_current(self, name: str) -> None:
+        if not self._folder:
+            return
+        data = setlists.load()
+        if setlists.add_folder(data, name, self._folder):
+            setlists.save(data)
+            if self._setlist_name == name:
+                self._refresh_setlist_btn()
+            toast(self, f"Brano aggiunto a «{name}».", "ok")
+
+    def _setlist_remove_current(self, name: str) -> None:
+        data = setlists.load()
+        if setlists.remove_folder(data, name, self._folder):
+            setlists.save(data)
+            if self._setlist_name == name:
+                self._setlist_name = None
+                self._setlist_pos = -1
+                self._refresh_setlist_btn()
+            toast(self, f"Brano rimosso da «{name}».", "info")
+
+    def _setlist_rename(self, name: str) -> None:
+        new, ok = QInputDialog.getText(self, "Rinomina scaletta",
+                                       "Nuovo nome:", text=name)
+        if not ok:
+            return
+        data = setlists.load()
+        if not setlists.rename(data, name, new):
+            toast(self, "Nome non valido o già in uso.", "warn")
+            return
+        setlists.save(data)
+        if self._setlist_name == name:
+            self._setlist_name = new.strip()
+            self._refresh_setlist_btn()
+
+    def _setlist_delete(self, name: str) -> None:
+        if QMessageBox.question(
+                self, "Elimina scaletta",
+                f"Eliminare la scaletta «{name}»?\n"
+                "I brani e i loro file non vengono toccati.") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        data = setlists.load()
+        if setlists.delete(data, name):
+            setlists.save(data)
+            if self._setlist_name == name:
+                self._setlist_name = None
+                self._setlist_pos = -1
+                self._refresh_setlist_btn()
+            toast(self, f"Scaletta «{name}» eliminata.", "info")
 
     # ---------- accordatore ----------
 
@@ -2033,6 +2375,7 @@ class MixerTab(QWidget):
                 "b": self._loop_b,
                 "on": self.loop_btn.isChecked(),
             },
+            "marks": self._marks,
             "tracks": {s.name: s.state() for s in self.strips},
         }
         try:
@@ -2089,6 +2432,22 @@ class MixerTab(QWidget):
             self.loop_btn.blockSignals(False)
             theme.repolish(self.loop_btn)
             self._apply_loop()
+        # punti nominati (marcatori / loop salvati)
+        marks = data.get("marks")
+        if isinstance(marks, list):
+            self._marks = []
+            for m in marks:
+                if not (isinstance(m, dict) and isinstance(m.get("name"), str)
+                        and isinstance(m.get("a"), (int, float))):
+                    continue
+                b = m.get("b")
+                self._marks.append({
+                    "name": m["name"],
+                    "a": max(0.0, min(1.0, float(m["a"]))),
+                    "b": max(0.0, min(1.0, float(b))) if isinstance(b, (int, float)) else None,
+                })
+            self._marks.sort(key=lambda m: m["a"])
+            self._refresh_mark_flags()
 
     def seek_seconds(self, seconds: float) -> None:
         """Seek assoluto in secondi (usato dal click sulle righe karaoke)."""

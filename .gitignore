@@ -18,7 +18,10 @@ venv/
 env/
 
 # --- Config / cache locali ---
-/.claude/
+# .claude: si versionano settings.json (hook) e skills/, non i settings personali
+/.claude/*
+!/.claude/settings.json
+!/.claude/skills/
 *.log
 
 # --- Editor / OS ---

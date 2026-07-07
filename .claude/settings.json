@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 30,
+            "command": "f=$(python -c \"import sys,json,pathlib;print(pathlib.PureWindowsPath(json.load(sys.stdin).get('tool_input',{}).get('file_path','')).as_posix())\"); case \"$f\" in */dist/*|*/build/*|*/dist_installer/*) echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Cartella generata da PyInstaller: non modificare dist/, build/ o dist_installer/.\"}}';; esac"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 180,
+            "statusMessage": "pytest in corso…",
+            "command": "f=$(python -c \"import sys,json,pathlib;print(pathlib.PureWindowsPath(json.load(sys.stdin).get('tool_input',{}).get('file_path','')).as_posix())\"); case \"$f\" in */app/*.py|*/tests/*.py) out=$(python -m pytest -q 2>&1) || { echo \"$out\" >&2; exit 2; };; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

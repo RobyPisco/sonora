@@ -151,6 +151,9 @@ per brano.</p>
     <b>metronomo</b> fa il click sui beat (segue anche la velocità) e le
     <b>sezioni del brano</b> (strofa, ritornello…) diventano pulsanti per
     saltare o loopare una sezione.</li>
+<li><b>«Conteggio»</b> (pre-conteggio): al Play parte una battuta di click a
+    tempo e poi entra il brano, così arrivi pronto sull'attacco. Scegli quante
+    battute e, volendo, fallo ripetere a ogni giro del loop.</li>
 <li><b>Zoom</b> delle forme d'onda con +/− o {K('Ctrl+rotella')};
     trascina sulla timeline per spostarti nel brano.</li>
 </ul>

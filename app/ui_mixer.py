@@ -867,6 +867,10 @@ class MixerTab(QWidget):
         self._autospeed_reps = 2     # giri di loop prima di accelerare
         self._autospeed_cycles = 0
         self._autospeed_last_lc = 0
+        # pre-conteggio (count-in) dal vivo
+        self._countin_on = False     # conteggio prima del Play
+        self._countin_beats = 4      # battute di conteggio
+        self._countin_loop = False   # anche a ogni giro del loop
 
         self._build_ui()
         self._setup_shortcuts()
@@ -1215,6 +1219,16 @@ class MixerTab(QWidget):
         self.click_vol.setMaximumWidth(80)
         self.click_vol.setToolTip("Volume del click")
         self.click_vol.valueChanged.connect(lambda v: self.engine.set_click(self.click_btn.isChecked(), v / 100))
+        # pre-conteggio (count-in): al Play parte una battuta di click, poi l'audio
+        self.countin_btn = QPushButton("Conteggio")
+        self.countin_btn.setObjectName("GhostMini")
+        self.countin_btn.setMinimumWidth(88)
+        self.countin_btn.setProperty("accent", "ok")
+        self.countin_btn.setIcon(icons.icon("metronome", mut, 13))
+        self.countin_btn.setToolTip(
+            "Pre-conteggio: al Play senti una battuta di click e poi parte il brano\n"
+            "(anche prima di ogni giro del loop). Richiede l'analisi. Clicca per configurare.")
+        self.countin_btn.clicked.connect(self._show_countin)
 
         # transport play/stop/tempo: play tondo con icona play/pausa
         self.play_btn = QPushButton()
@@ -1247,7 +1261,7 @@ class MixerTab(QWidget):
         for _b in (self.a_btn, self.b_btn, self.loop_btn, self.marks_btn,
                    self.loopclr_btn, self.autospeed_btn, self.zoomout_btn,
                    self.zoomin_btn, self.zoomfit_btn, self.beatgrid_btn,
-                   self.click_btn, self.steady_btn,
+                   self.click_btn, self.steady_btn, self.countin_btn,
                    self.pitch_down_btn, self.pitch_up_btn,
                    *(pb for _p, pb in self.speed_presets)):
             _b.setFixedHeight(30)
@@ -1293,7 +1307,7 @@ class MixerTab(QWidget):
         groups.addWidget(_tgroup("ZOOM", self.zoomout_btn, self.zoomin_btn,
                                  self.zoomfit_btn, self.beatgrid_btn))
         groups.addWidget(_tgroup("CLICK", self.click_btn, self.steady_btn,
-                                 self.click_vol))
+                                 self.countin_btn, self.click_vol))
         groups.addWidget(_tgroup("MASTER", self.master))
         bar.addWidget(groups_host, 1)
 
@@ -2000,6 +2014,8 @@ class MixerTab(QWidget):
         if self.engine.is_playing():
             self.engine.pause()
         else:
+            if self._countin_on and self._beats_ready:
+                self.engine.arm_count_in(self._countin_beats)
             self.engine.play()
         self._sync_play_btn()
 
@@ -2252,6 +2268,65 @@ class MixerTab(QWidget):
             self._apply_transform()
         if target >= 100:
             self._set_autospeed_active(False)   # progressione completata
+
+    # ---------- pre-conteggio (count-in) ----------
+
+    def _refresh_countin_btn(self) -> None:
+        theme.set_state(self.countin_btn, "on", self._countin_on)
+
+    def _apply_countin_cfg(self) -> None:
+        """Riallinea motore + pulsante allo stato corrente del count-in."""
+        if self._countin_on and not self._beats_ready:
+            toast(self, "Pre-conteggio: prima analizza il brano (serve il tempo).", "warn")
+            self._countin_on = False
+        self.engine.set_loop_count_in(
+            self._countin_beats if (self._countin_on and self._countin_loop) else 0)
+        self._refresh_countin_btn()
+
+    def _show_countin(self) -> None:
+        """Popup: attiva il pre-conteggio, scegli le battute e se ripeterlo a ogni giro."""
+        menu = QMenu(self)
+        box = QVBoxLayout()
+        box.setContentsMargins(10, 8, 10, 8)
+        box.setSpacing(6)
+
+        chk = QCheckBox("Pre-conteggio prima del Play")
+        chk.setChecked(self._countin_on)
+        box.addWidget(chk)
+
+        line = QHBoxLayout()
+        lb = QLabel("Battute")
+        lb.setStyleSheet(f"color:{theme.COLORS['muted']}; font-size:11px;")
+        lb.setFixedWidth(96)
+        sp = QSpinBox(); sp.setRange(1, 8); sp.setValue(self._countin_beats)
+        line.addWidget(lb); line.addWidget(sp)
+        box.addLayout(line)
+
+        chk_loop = QCheckBox("Anche a ogni giro del loop")
+        chk_loop.setChecked(self._countin_loop)
+        box.addWidget(chk_loop)
+
+        hint = QLabel("Richiede l'analisi del brano (per il tempo).")
+        hint.setStyleSheet(
+            f"color:{theme.COLORS['faint']}; font-size:10px; font-style:italic;")
+        box.addWidget(hint)
+
+        def _apply() -> None:
+            self._countin_beats = int(sp.value())
+            self._countin_on = chk.isChecked()
+            self._countin_loop = chk_loop.isChecked()
+            self._apply_countin_cfg()
+            if chk.isChecked() != self._countin_on:   # rifiutato per mancanza di beat
+                chk.blockSignals(True); chk.setChecked(self._countin_on); chk.blockSignals(False)
+
+        chk.toggled.connect(lambda _: _apply())
+        chk_loop.toggled.connect(lambda _: _apply())
+        sp.valueChanged.connect(lambda _: _apply())
+
+        wrap = QWidget(); wrap.setLayout(box)
+        act = QWidgetAction(menu); act.setDefaultWidget(wrap)
+        menu.addAction(act)
+        menu.exec(self.countin_btn.mapToGlobal(self.countin_btn.rect().bottomLeft()))
 
     # ---------- metronomo ----------
 

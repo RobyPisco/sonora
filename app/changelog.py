@@ -12,6 +12,16 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.11.0", [
+        "Nuovo «Conteggio» nel Mixer (gruppo CLICK): premi Play e senti una "
+        "battuta di click a tempo prima che parta il brano, così arrivi "
+        "pronto sull'attacco. Puoi scegliere quante battute e farlo ripetere "
+        "anche a ogni giro del loop, per studiare un passaggio da capo ogni "
+        "volta senza perdere il tempo. (Richiede l'analisi del brano.)",
+        "Correzioni di stabilità dell'audio: eliminato un raro messaggio di "
+        "errore che poteva comparire lasciando l'app aperta a lungo senza "
+        "usarla; da fermo il Mixer non tiene più occupata la scheda audio.",
+    ]),
     ("1.10.0", [
         "Gli accordi nel Mixer ora seguono la trasposizione: se alzi o abbassi "
         "il tono, la tonalità mostrata cambia con te (per esempio Lam diventa "

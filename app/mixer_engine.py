@@ -4,12 +4,15 @@ stream audio (sync campione-esatto). Niente Qt: modulo audio puro.
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
+
+_log = logging.getLogger("sonora.mixer_engine")
 
 
 def db_to_gain(db: float) -> float:
@@ -44,6 +47,12 @@ class MixerEngine:
         self._master_db = 0.0
         self._lock = threading.Lock()
         self._stream: sd.OutputStream | None = None
+        self._cb_err_logged = False   # log dell'errore in callback una volta sola
+        # pre-conteggio (count-in) dal vivo
+        self._countin: np.ndarray | None = None   # buffer in riproduzione (one-shot)
+        self._countin_pos = 0
+        self._loop_countin: np.ndarray | None = None   # template iniettato a ogni giro
+        self._loop_countin_beats = 0                    # 0 = disattivo
         # velocità (time-stretch) e trasposizione (pitch shift)
         self.speed = 1.0
         self.semitones = 0.0
@@ -129,16 +138,51 @@ class MixerEngine:
             mix[write:write + length, 1] += c
 
     def _callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
+        # Gira su un thread nativo di PortAudio: qualunque eccezione che sfugga
+        # verrebbe intercettata da cffi e mostrata come popup "Python-CFFI error"
+        # (nella build windowed non c'è stderr). La ingoiamo qui, riempiendo di
+        # silenzio, così l'app non mostra mai quel dialogo.
+        try:
+            self._render(outdata, frames)
+        except Exception:  # noqa: BLE001
+            try:
+                outdata.fill(0)
+            except Exception:  # noqa: BLE001
+                pass
+            if not self._cb_err_logged:
+                self._cb_err_logged = True
+                _log.warning("Errore nella callback audio (silenziata)", exc_info=True)
+            return
+        self._cb_err_logged = False   # callback riuscita: riarma il log
+
+    def _render(self, outdata, frames) -> None:  # noqa: ANN001
         with self._lock:
             if not self._playing or not self.tracks:
                 outdata.fill(0)
                 return
-            mix = np.zeros((frames, 2), dtype="float32")
+            # --- pre-conteggio: suona il count-in armato PRIMA dell'audio, senza
+            # far avanzare la playhead (la posizione resta ferma finché il click
+            # non finisce). Può riempire solo una parte del blocco.
+            head = 0
+            if self._countin is not None:
+                cin = self._countin
+                n = min(frames, cin.shape[0] - self._countin_pos)
+                if n > 0:
+                    outdata[:n] = cin[self._countin_pos:self._countin_pos + n]
+                    self._countin_pos += n
+                    head = n
+                if self._countin_pos >= cin.shape[0]:
+                    self._countin = None
+                    self._countin_pos = 0
+                if head >= frames:
+                    return   # blocco riempito interamente dal count-in
+            song_frames = frames - head
+            mix = np.zeros((song_frames, 2), dtype="float32")
             any_solo = any(t.solo for t in self.tracks)
             pos = self._pos
             loop_a = int(self.loop_a * self.n_frames)
             loop_b = int(self.loop_b * self.n_frames)
-            remaining = frames
+            remaining = song_frames
             write = 0
             while remaining > 0:
                 if self.loop_enabled and pos < loop_b and (pos + remaining) > loop_b:
@@ -154,12 +198,18 @@ class MixerEngine:
                 if self.loop_enabled and pos >= loop_b:
                     pos = loop_a
                     self._loop_count += 1
+                    if self._loop_countin is not None:
+                        # inietta il count-in: il resto del blocco resta in silenzio,
+                        # il conteggio parte dal prossimo callback e poi l'audio da loop_a
+                        self._countin = self._loop_countin
+                        self._countin_pos = 0
+                        break
                 elif pos >= self.n_frames:
                     self._playing = False
                     break
             mix *= db_to_gain(self._master_db)
             np.clip(mix, -1.0, 1.0, out=mix)
-            outdata[:] = mix
+            outdata[head:] = mix
             self._pos = min(pos, self.n_frames)
 
     # ---------- trasporto ----------
@@ -179,10 +229,17 @@ class MixerEngine:
         with self._lock:
             self._playing = False
             self._pos = 0
+            self._countin = None       # niente conteggio pendente dopo lo stop
+            self._countin_pos = 0
+        # Da fermo non serve tenere aperto lo stream (e la sua callback attiva
+        # ~43×/s per ore): lo chiudiamo, verrà riaperto al prossimo play().
+        self._close_stream()
 
     def seek(self, seconds: float) -> None:
         with self._lock:
             self._pos = int(max(0, min(seconds * self.sr, self.n_frames)))
+            self._countin = None       # saltando altrove, annulla un conteggio in corso
+            self._countin_pos = 0
 
     def is_playing(self) -> bool:
         return self._playing
@@ -303,6 +360,7 @@ class MixerEngine:
         for t in self.tracks:
             self._apply_eq_track(t)
         self._regen_click()
+        self._regen_loop_countin()
 
     # ---------- render offline del mix (export) ----------
 
@@ -362,6 +420,36 @@ class MixerEngine:
         np.clip(buf, -1.0, 1.0, out=buf)
         return np.ascontiguousarray(np.column_stack([buf, buf])), self.sr
 
+    def arm_count_in(self, n_beats: int = 4) -> bool:
+        """Arma un count-in one-shot: al prossimo blocco audio il callback suona
+        n_beats click al tempo del brano prima di far partire l'audio. Ritorna
+        False (e non arma nulla) se non ci sono beat noti."""
+        buf, _ = self.render_count_in(n_beats)
+        with self._lock:
+            self._countin = None if buf is None else np.ascontiguousarray(buf, "float32")
+            self._countin_pos = 0
+        return buf is not None
+
+    def set_loop_count_in(self, n_beats: int) -> None:
+        """Attiva/disattiva il pre-conteggio a ogni ripartenza del loop
+        (n_beats=0 = disattivo). Il template si rigenera qui e a ogni cambio di
+        velocità/beat (l'intervallo del click dipende da entrambi)."""
+        self._loop_countin_beats = max(0, int(n_beats))
+        self._regen_loop_countin()
+
+    def _regen_loop_countin(self) -> None:
+        buf = None
+        if self._loop_countin_beats > 0:
+            buf, _ = self.render_count_in(self._loop_countin_beats)
+        with self._lock:
+            self._loop_countin = None if buf is None else np.ascontiguousarray(buf, "float32")
+
+    def cancel_count_in(self) -> None:
+        """Annulla un eventuale count-in in corso/armato (stop, seek)."""
+        with self._lock:
+            self._countin = None
+            self._countin_pos = 0
+
     # ---------- loop A-B ----------
 
     def set_loop(self, a: float, b: float, enabled: bool) -> None:
@@ -386,6 +474,7 @@ class MixerEngine:
     def set_beats(self, beats: list[float]) -> None:
         self._beats = list(beats or [])
         self._regen_click()
+        self._regen_loop_countin()
 
     def set_click(self, enabled: bool, gain: float | None = None) -> None:
         self.click_enabled = enabled
@@ -459,10 +548,15 @@ class MixerEngine:
             self._click = click
 
     def close(self) -> None:
-        if self._stream is not None:
+        self._close_stream()
+
+    def _close_stream(self) -> None:
+        # Va chiamato SENZA tenere self._lock: stream.stop() attende la fine
+        # della callback, che a sua volta acquisisce self._lock (deadlock).
+        stream, self._stream = self._stream, None
+        if stream is not None:
             try:
-                self._stream.stop()
-                self._stream.close()
+                stream.stop()
+                stream.close()
             except Exception:  # noqa: BLE001
-                pass
-            self._stream = None
+                _log.warning("Errore chiudendo lo stream audio", exc_info=True)

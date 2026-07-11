@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__, app_update, changelog, config, diagnostics, history, icons, paths, stems, theme, updater
 from .toast import Banner, toast
+from .ui_guide import GuidePage
 from .ui_playbar import PlayBar
 from .ui_settings import UI_SCALES, SettingsPage
 from .ui_shell import NavRail
@@ -638,14 +639,18 @@ class MainWindow(QWidget):
 
         self.mixer_tab.song_loaded.connect(self.lyrics_tab.load_song_lyrics)
 
+        self.guide_page = GuidePage()
+
         self.stack.addWidget(dl_tab)                              # 0 · Scarica
         self._mixer_index = self.stack.addWidget(self.mixer_tab)  # 1 · Mixer
         self._lyrics_index = self.stack.addWidget(self.lyrics_tab)  # 2 · Testi
-        self.stack.addWidget(self.settings_page)                  # 3 · Impostazioni
+        self.stack.addWidget(self.guide_page)                     # 3 · Guida
+        self.stack.addWidget(self.settings_page)                  # 4 · Impostazioni
 
         self.rail.add_page("download", "Scarica")
         self.rail.add_page("mixer", "Mixer")
         self.rail.add_page("mic", "Testi")
+        self.rail.add_page("info", "Guida", bottom=True)
         self.rail.add_page("settings", "Impostazioni", bottom=True)
         self.rail.page_selected.connect(self.stack.setCurrentIndex)
         # playbar contestuale: fissa solo su Testi, altrove solo con task attivi

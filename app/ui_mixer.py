@@ -826,6 +826,10 @@ class MixerTab(QWidget):
         sc(Qt.Key.Key_Space, self._on_play)
         sc("L", lambda: self.loop_btn.toggle())
         sc(Qt.Key.Key_Home, lambda: self.engine.seek(0))
+        sc(Qt.Key.Key_Left, lambda: self._nudge_seconds(-1.0))
+        sc(Qt.Key.Key_Right, lambda: self._nudge_seconds(+1.0))
+        sc("Shift+Left", lambda: self._nudge_seconds(-5.0))
+        sc("Shift+Right", lambda: self._nudge_seconds(+5.0))
         sc("A", lambda: self._set_ab("a"))
         sc("B", lambda: self._set_ab("b"))
         for i in range(6):
@@ -835,6 +839,11 @@ class MixerTab(QWidget):
             sc(f"Ctrl+{i + 1}", lambda i=i: self._recall_mark(i))
         sc("Ctrl+Right", lambda: self._setlist_step(+1))
         sc("Ctrl+Left", lambda: self._setlist_step(-1))
+
+    def _nudge_seconds(self, delta: float) -> None:
+        """Sposta la playhead di `delta` secondi (frecce ←/→; tenendo premuto
+        il tasto l'auto-ripetizione della QShortcut fa scorrere di continuo)."""
+        self.engine.seek(self.engine.position() + delta)
 
     def _toggle_track_mute(self, i: int) -> None:
         if i < len(self.strips):

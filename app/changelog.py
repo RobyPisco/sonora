@@ -12,6 +12,15 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.9.0", [
+        "Nuova pagina «Guida» nella barra laterale: il manuale completo di "
+        "Sonora, sempre a portata di mano — dal download alla separazione in "
+        "stem, dal Mixer all'export, con la tabella di tutte le scorciatoie "
+        "da tastiera.",
+        "Nel Mixer ora ti muovi con le frecce: ← e → spostano la riproduzione "
+        "di 1 secondo (tieni premuto per scorrere), con Shift il salto è di "
+        "5 secondi.",
+    ]),
     ("1.8.0", [
         "Punti del brano con nome nel Mixer (gruppo «PUNTI»): salva un "
         "marcatore al punto in cui sei o l'intero loop A-B («assolo», "

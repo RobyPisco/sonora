@@ -12,6 +12,19 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.10.0", [
+        "Gli accordi nel Mixer ora seguono la trasposizione: se alzi o abbassi "
+        "il tono, la tonalità mostrata cambia con te (per esempio Lam diventa "
+        "Sim), così quello che leggi è sempre quello che suoni.",
+        "Nuovo «Foglio accordi» tra le opzioni di esportazione: salva un file "
+        "di testo stampabile con gli accordi divisi per sezione, la tonalità e "
+        "i BPM — comodo da portare alle prove.",
+        "Nel dialogo di esportazione c'è la spunta «Esporta senza metadati» per "
+        "ottenere file MP3 puliti, senza alcuna etichetta.",
+        "Separazione «Qualità massima» (Roformer): gli stem ora si "
+        "ricompongono esattamente nel brano completo, per un mix più fedele "
+        "quando li riascolti insieme.",
+    ]),
     ("1.9.0", [
         "Nuova pagina «Guida» nella barra laterale: il manuale completo di "
         "Sonora, sempre a portata di mano — dal download alla separazione in "

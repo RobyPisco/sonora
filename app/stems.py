@@ -666,6 +666,50 @@ def _pick_stem(folder: Path, stem: str, ext: str) -> Path | None:
     return None
 
 
+def _other_by_subtraction(inst: Path, parts: list[Path], out_path: Path) -> bool:
+    """Scrive out_path = strumentale − somma(parts). Così, nella cascata rof6,
+    vocals+drums+bass+guitar+piano+other ricompone di nuovo il mix.
+    Allinea lunghezza e canali; ritorna False (→ fallback) se qualcosa manca o
+    se il formato non è scrivibile con soundfile (es. mp3)."""
+    if out_path.suffix.lower() == ".mp3":
+        return False   # soundfile non codifica mp3
+    try:
+        import numpy as np
+        import soundfile as sf
+    except Exception:   # noqa: BLE001
+        return False
+    try:
+        base, sr = sf.read(str(inst), dtype="float32", always_2d=True)
+        datas = []
+        for p in parts:
+            if not p.exists():
+                return False
+            d, _sr = sf.read(str(p), dtype="float32", always_2d=True)
+            datas.append(d)
+        length = min([base.shape[0]] + [d.shape[0] for d in datas])
+        ch = base.shape[1]
+
+        def fit(a):   # noqa: ANN001, ANN202
+            a = a[:length]
+            if a.shape[1] == ch:
+                return a
+            if a.shape[1] == 1:
+                return np.repeat(a, ch, axis=1)
+            return a[:, :ch]
+
+        acc = np.zeros((length, ch), dtype="float32")
+        for d in datas:
+            acc += fit(d)
+        other = base[:length] - acc
+        if out_path.suffix.lower() == ".wav":
+            sf.write(str(out_path), other, sr, subtype="PCM_16")
+        else:
+            sf.write(str(out_path), other, sr)
+        return True
+    except Exception:   # noqa: BLE001
+        return False
+
+
 def _run_roformer(src: Path, model: str, out_format: str,
                   log_cb: LogCb, progress_cb: ProgCb, cancel: Cancel) -> Path:
     """Separa src col modello Roformer indicato. Ritorna la cartella di output.
@@ -948,6 +992,7 @@ def separate(input_file: str, mode: str, out_format: str,
             take(voc, f"vocals{ext}")
             if not inst or not inst.exists():
                 raise RuntimeError("strumentale Roformer non prodotto")
+            demucs_other: Path | None = None
             for i, model in enumerate(("htdemucs_ft", "htdemucs_6s"), start=2):
                 if cancel():
                     raise RuntimeError("annullato")
@@ -956,7 +1001,21 @@ def separate(input_file: str, mode: str, out_format: str,
                                        log_cb, _step_progress(progress_cb, i - 1, 3),
                                        cancel)
                 for stem in ROF_PICK[model]:
+                    if stem == "other":
+                        # non lo prendiamo da Demucs: lo ricostruiamo per sottrazione
+                        demucs_other = produced / f"other{ext}"
+                        continue
                     take(produced / f"{stem}{ext}")
+            # other = strumentale − (batteria+basso+chitarra+piano): così la somma
+            # degli stem ricompone il mix. Se fallisce, ripiego sull'other di Demucs.
+            other_dst = final_dir / f"other{ext}"
+            inst_parts = [final_dir / f"{s}{ext}"
+                          for s in ("drums", "bass", "guitar", "piano")]
+            if _other_by_subtraction(inst, inst_parts, other_dst):
+                out_files.append(str(other_dst))
+            else:
+                log_cb("Ricostruzione «other» non riuscita: uso quello di Demucs.")
+                take(demucs_other, f"other{ext}")
         else:
             model = MODEL_FOR_MODE.get(mode, "htdemucs_6s")
             produced = _run_demucs(src, model, out_format, mode == "2",

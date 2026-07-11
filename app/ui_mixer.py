@@ -53,6 +53,25 @@ def chord_label(root: int, quality: str, notation: str) -> str:
         return "—"
     return names[root] + ("m" if quality == "min" else "")
 
+
+# note → classe di altezza (0..11), con enarmonie e nomi latini, per trasporre
+# il nome della tonalità nell'intestazione del foglio accordi.
+_PC_ALIASES = {
+    "C": 0, "B#": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3, "E": 4, "FB": 4,
+    "F": 5, "E#": 5, "F#": 6, "GB": 6, "G": 7, "G#": 8, "AB": 8, "A": 9, "A#": 10,
+    "BB": 10, "B": 11, "CB": 11,
+    "DO": 0, "DO#": 1, "REB": 1, "RE": 2, "RE#": 3, "MIB": 3, "MI": 4, "FA": 5,
+    "FA#": 6, "SOLB": 6, "SOL": 7, "SOL#": 8, "LAB": 8, "LA": 9, "LA#": 10,
+    "SIB": 10, "SI": 11,
+}
+
+
+def _note_to_pc(name: str):
+    """Classe di altezza 0..11 di un nome di nota (anglo o latino), o None."""
+    if not name:
+        return None
+    return _PC_ALIASES.get(name.strip().upper())
+
 # Colori per stem: definiti in theme.py (unica fonte di verità)
 STEM_COLORS = theme.STEM_COLORS
 STEM_ORDER = ["vocals", "drums", "bass", "guitar", "piano", "other"]
@@ -145,8 +164,11 @@ class EqWorker(QObject):
         self.done.emit(self._index)
 
 
-def _export_audio(mix: np.ndarray, sr: int, path: str, fmt: str) -> None:
-    """Scrive il mix su file. WAV diretto via soundfile; MP3 via ffmpeg (bin/)."""
+def _export_audio(mix: np.ndarray, sr: int, path: str, fmt: str,
+                  strip_metadata: bool = False) -> None:
+    """Scrive il mix su file. WAV diretto via soundfile; MP3 via ffmpeg (bin/).
+    strip_metadata: MP3 senza alcun tag, nemmeno quello «encoder» di ffmpeg
+    (i WAV via soundfile sono già privi di metadati)."""
     import soundfile as sf
 
     if fmt == "wav":
@@ -163,7 +185,12 @@ def _export_audio(mix: np.ndarray, sr: int, path: str, fmt: str) -> None:
     tmp.close()
     try:
         sf.write(tmp.name, mix, sr, subtype="PCM_16")
-        cmd = [str(ff), "-y", "-i", tmp.name, "-b:a", "320k", path]
+        cmd = [str(ff), "-y", "-i", tmp.name, "-b:a", "320k"]
+        if strip_metadata:
+            # -map_metadata -1: niente tag dall'input; -bitexact: ffmpeg non
+            # scrive il proprio tag «encoder» (TSSE «Lavf…»)
+            cmd += ["-map_metadata", "-1", "-bitexact"]
+        cmd.append(path)
         si = None
         if os.name == "nt":
             si = subprocess.STARTUPINFO()
@@ -184,20 +211,22 @@ class ExportWorker(QObject):
 
     done = Signal(bool, str)   # ok, path-o-errore
 
-    def __init__(self, jobs: list[tuple], sr: int, fmt: str):
+    def __init__(self, jobs: list[tuple], sr: int, fmt: str,
+                 strip_metadata: bool = False):
         super().__init__()
         # lista (buffer | callable→buffer, path). I callable rendono il mix al
         # momento della scrittura: N export "minus one" senza N buffer in RAM.
         self._jobs = jobs
         self._sr = sr
         self._fmt = fmt
+        self._strip = strip_metadata
 
     def run(self) -> None:
         try:
             for mix, path in self._jobs:
                 if callable(mix):
                     mix = mix()
-                _export_audio(mix, self._sr, path, self._fmt)
+                _export_audio(mix, self._sr, path, self._fmt, self._strip)
             self.done.emit(True, self._jobs[0][1] if self._jobs else "")
         except Exception as exc:  # noqa: BLE001
             self.done.emit(False, str(exc).splitlines()[0] if str(exc) else "errore")
@@ -206,7 +235,7 @@ class ExportWorker(QObject):
 class ExportOptionsDialog(QDialog):
     """Chiede cosa esportare (mix o stem separati), formato e opzioni metronomo."""
 
-    def __init__(self, parent, click_available: bool):
+    def __init__(self, parent, click_available: bool, chords_available: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Opzioni di esportazione")
         self.setModal(True)
@@ -223,15 +252,22 @@ class ExportOptionsDialog(QDialog):
                                      "stem escluso (NO_VOCE, NO_BASSO, …)")
         self.rb_stems = QRadioButton("Tutti gli stem — un file per traccia, puri,\n"
                                      "con velocità e tono attuali applicati")
+        self.rb_sheet = QRadioButton("Foglio accordi (testo stampabile: accordi,\n"
+                                     "struttura, tonalità e BPM)")
+        self.rb_sheet.setEnabled(chords_available)
+        if not chords_available:
+            self.rb_sheet.setToolTip("Analizza il brano per rilevare gli accordi.")
         self.rb_mix.setChecked(True)
         self._grp_what = QButtonGroup(self)
         self._grp_what.addButton(self.rb_mix)
         self._grp_what.addButton(self.rb_minus)
         self._grp_what.addButton(self.rb_stems)
+        self._grp_what.addButton(self.rb_sheet)
         lay.addWidget(what_lbl)
         lay.addWidget(self.rb_mix)
         lay.addWidget(self.rb_minus)
         lay.addWidget(self.rb_stems)
+        lay.addWidget(self.rb_sheet)
 
         # formato
         fmt_lbl = QLabel("FORMATO")
@@ -248,6 +284,14 @@ class ExportOptionsDialog(QDialog):
         fmt_row.addStretch(1)
         lay.addWidget(fmt_lbl)
         lay.addLayout(fmt_row)
+
+        # file puliti: nessun tag. Sull'MP3 elimina anche il tag «encoder» di
+        # ffmpeg; i WAV sono già privi di metadati.
+        self.chk_no_meta = QCheckBox("Esporta senza metadati (file puliti)")
+        self.chk_no_meta.setToolTip(
+            "Rimuove ogni tag dall'MP3 (compreso quello «encoder» di ffmpeg).\n"
+            "I WAV sono già senza metadati.")
+        lay.addWidget(self.chk_no_meta)
 
         # opzioni metronomo (valgono solo per il mix unico)
         self.chk_click = QCheckBox("Includi il click (metronomo) per tutto il brano")
@@ -279,22 +323,35 @@ class ExportOptionsDialog(QDialog):
             info.setProperty("class", "Muted")
             lay.addWidget(info)
 
+        # il foglio accordi è testo: formato e metadati non lo riguardano →
+        # disabilitali quando è selezionato (click/count-in hanno regole proprie
+        # e restano semplicemente ignorati per il foglio)
+        self._audio_only = [self.rb_wav, self.rb_mp3, self.chk_no_meta]
+        self.rb_sheet.toggled.connect(self._on_sheet_toggled)
+
         bb = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
 
-    def options(self) -> tuple[str, str, bool, bool, int]:
-        """(what, fmt, click, countin, beats) — what: 'mix'|'minus'|'stems',
-        fmt: 'wav'|'mp3'."""
-        what = ("stems" if self.rb_stems.isChecked()
+    def _on_sheet_toggled(self, on: bool) -> None:
+        """Foglio accordi selezionato → disabilita formato e metadati."""
+        for w in self._audio_only:
+            w.setEnabled(not on)
+
+    def options(self) -> tuple[str, str, bool, bool, int, bool]:
+        """(what, fmt, click, countin, beats, strip_meta) — what: 'mix'|'minus'|
+        'stems'|'sheet', fmt: 'wav'|'mp3', strip_meta: esporta senza metadati."""
+        what = ("sheet" if self.rb_sheet.isChecked()
+                else "stems" if self.rb_stems.isChecked()
                 else "minus" if self.rb_minus.isChecked() else "mix")
         return (what,
                 "mp3" if self.rb_mp3.isChecked() else "wav",
                 self.chk_click.isChecked(),
                 self.chk_countin.isChecked(),
-                self.spin_beats.value())
+                self.spin_beats.value(),
+                self.chk_no_meta.isChecked())
 
 
 def _hgroup(*widgets, spacing: int = 6) -> QWidget:
@@ -964,6 +1021,7 @@ class MixerTab(QWidget):
         # --- riga meta: SEZIONI (sx) · ACCORDO (dx) · notazione ---
         self._sections: list[dict] = []
         self._sec_duration = 0.0
+        self._analysis: dict = {}     # ultimo report d'analisi (per il foglio accordi)
         self._chords: list[dict] = []
         self._chord_times: list[float] = []
         self._chord_shown = -2
@@ -1464,6 +1522,7 @@ class MixerTab(QWidget):
         self.card_dur[1].setText(_fmt_time(self.engine.duration()))
         for name in STEM_ORDER:
             self.presence_lbls[name].setText("—")
+        self._analysis = {}
         self._chords = []
         self._chord_times = []
         self.chord_now.setText("—")
@@ -1480,6 +1539,7 @@ class MixerTab(QWidget):
             self.timeline.set_data([], self.engine.duration())
 
     def _apply_analysis(self, d: dict) -> None:
+        self._analysis = d or {}
         key = d.get("key")
         mode = d.get("mode", "")
         self.card_key[1].setText(f"{key} {mode}" if key else "—")
@@ -1561,7 +1621,8 @@ class MixerTab(QWidget):
 
     def _refresh_chords(self, force: bool = False) -> None:
         """Aggiorna l'accordo corrente/successivo in base alla posizione di riproduzione.
-        I tempi degli accordi sono nel dominio originale → scalati per la velocità."""
+        I tempi degli accordi sono nel dominio originale → scalati per la velocità.
+        Le radici seguono la trasposizione corrente (es. Am→Bm con +2 semitoni)."""
         if not self._chords:
             if force:
                 self.chord_now.setText("—")
@@ -1569,15 +1630,21 @@ class MixerTab(QWidget):
             return
         orig_time = self.engine.position() * max(self.engine.speed, 1e-6)
         i = self._current_chord_index(orig_time)
-        if not force and i == getattr(self, "_chord_shown", -2):
+        semis = self.pitch_slider.value()
+        if not force and i == getattr(self, "_chord_shown", -2) \
+                and semis == getattr(self, "_chord_semis", 0):
             return
         self._chord_shown = i
+        self._chord_semis = semis
         cur = self._chords[i] if i >= 0 else None
         nxt = self._chords[i + 1] if 0 <= i + 1 < len(self._chords) else None
-        self.chord_now.setText(
-            chord_label(cur["root"], cur["quality"], self._notation) if cur else "—")
+        self.chord_now.setText(self._chord_text(cur, semis) if cur else "—")
         self.chord_next.setText(
-            "→ " + chord_label(nxt["root"], nxt["quality"], self._notation) if nxt else "")
+            "→ " + self._chord_text(nxt, semis) if nxt else "")
+
+    def _chord_text(self, ch: dict, semis: int) -> str:
+        """Etichetta di un accordo con la radice trasposta di `semis` semitoni."""
+        return chord_label((ch["root"] + semis) % 12, ch["quality"], self._notation)
 
     # ---------- sezioni (struttura) ----------
 
@@ -2026,11 +2093,13 @@ class MixerTab(QWidget):
         if key == (1.0, 0):
             self.engine.apply_transform([t.data_orig for t in self.engine.tracks], speed, semis)
             self._save_session()
+            self._refresh_chords(force=True)
             return
         cached = self._xform_cache.get(key)
         if cached is not None:
             self.engine.apply_transform(cached, speed, semis)
             self._save_session()
+            self._refresh_chords(force=True)
             return
         self._set_xform_busy(True)
         self._st_thread = QThread()
@@ -2057,6 +2126,7 @@ class MixerTab(QWidget):
         self._xform_cache[(round(speed, 2), int(semis))] = buffers
         self.engine.apply_transform(buffers, speed, semis)
         self._save_session()
+        self._refresh_chords(force=True)
         # i cursori potrebbero essere cambiati durante l'elaborazione: ricontrolla
         QTimer.singleShot(0, self._apply_transform)
 
@@ -2241,15 +2311,20 @@ class MixerTab(QWidget):
     def _on_export(self) -> None:
         if not self.engine.tracks or (self._ex_thread and self._ex_thread.isRunning()):
             return
-        dlg = ExportOptionsDialog(self, click_available=self._beats_ready)
+        dlg = ExportOptionsDialog(self, click_available=self._beats_ready,
+                                  chords_available=bool(self._chords))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        what, fmt, include_click, want_countin, countin_beats = dlg.options()
+        what, fmt, include_click, want_countin, countin_beats, strip_meta = dlg.options()
+        if what == "sheet":
+            self._export_chord_sheet()
+            return
         if what == "stems":
-            self._export_all_stems(fmt)
+            self._export_all_stems(fmt, strip_meta)
             return
         if what == "minus":
-            self._export_minus_one(fmt, include_click, want_countin, countin_beats)
+            self._export_minus_one(fmt, include_click, want_countin,
+                                   countin_beats, strip_meta)
             return
 
         base = os.path.basename(self._folder.rstrip("/\\")) or "mix"
@@ -2287,10 +2362,12 @@ class MixerTab(QWidget):
                 # anteponi i click al mix → unico file: click, click… e parte il brano
                 mix = np.concatenate([cin, mix], axis=0)
 
-        self._start_export([(mix, path)], sr, fmt, kind="mix")
+        self._start_export([(mix, path)], sr, fmt, kind="mix",
+                           strip_metadata=strip_meta)
 
     def _export_minus_one(self, fmt: str, include_click: bool,
-                          want_countin: bool, countin_beats: int) -> None:
+                          want_countin: bool, countin_beats: int,
+                          strip_metadata: bool = False) -> None:
         """Esporta una base per ogni stem escluso: mix COMPLETO (ignora mute/solo,
         conserva volumi/pan/EQ/velocità/tono) meno una traccia alla volta.
         File: «NO_VOCE - titolo.ext» in una sottocartella automatica."""
@@ -2325,9 +2402,10 @@ class MixerTab(QWidget):
             tag_no = STEM_NO.get(t.name, f"NO_{t.name.upper()}")
             path = os.path.join(out_dir, f"{tag_no} - {base}.{fmt}")
             jobs.append((job_for(t.name), path))
-        self._start_export(jobs, self.engine.sr, fmt, kind="minus")
+        self._start_export(jobs, self.engine.sr, fmt, kind="minus",
+                           strip_metadata=strip_metadata)
 
-    def _export_all_stems(self, fmt: str) -> None:
+    def _export_all_stems(self, fmt: str, strip_metadata: bool = False) -> None:
         """Esporta ogni traccia come file separato (stem puri: solo velocità e
         tono applicati, niente volume/pan/EQ) in una sottocartella automatica."""
         base = os.path.basename(self._folder.rstrip("/\\")) or "stems"
@@ -2344,14 +2422,107 @@ class MixerTab(QWidget):
             label = STEM_IT.get(t.name, t.name.upper())
             path = os.path.join(out_dir, f"{label} - {base}.{fmt}")
             jobs.append((t.data_base, path))   # puro: post pitch/stretch, pre-EQ
-        self._start_export(jobs, self.engine.sr, fmt, kind="stems")
+        self._start_export(jobs, self.engine.sr, fmt, kind="stems",
+                           strip_metadata=strip_metadata)
 
-    def _start_export(self, jobs: list, sr: int, fmt: str, kind: str) -> None:
+    # ---------- foglio accordi (testo stampabile) ----------
+
+    def _transpose_key_name(self, key: str, semis: int) -> str:
+        """Nome della tonalità trasposto di `semis`, nella notazione corrente.
+        Vuoto se la tonalità non è riconoscibile."""
+        pc = _note_to_pc(key)
+        if pc is None:
+            return ""
+        names = NOTES_LATIN if self._notation == "latin" else NOTES_ANGLO
+        return names[(pc + semis) % 12]
+
+    @staticmethod
+    def _wrap_chords(labels: list[str], per_line: int = 4) -> list[str]:
+        """Righe di accordi allineati in colonne, `per_line` battute per riga."""
+        if not labels:
+            return []
+        w = max(len(x) for x in labels)
+        out = []
+        for i in range(0, len(labels), per_line):
+            row = labels[i:i + per_line]
+            out.append("  " + " | ".join(x.ljust(w) for x in row))
+        return out
+
+    def _build_chord_sheet(self, base: str, semis: int) -> str:
+        """Testo del foglio accordi: intestazione + accordi raggruppati per sezione.
+        Gli accordi riflettono la trasposizione e la notazione correnti."""
+        d = self._analysis or {}
+        lines = ["SONORA — Foglio accordi", f"Brano: {base}"]
+        meta = []
+        key = str(d.get("key") or "").strip()
+        mode = str(d.get("mode") or "").strip()
+        if key:
+            meta.append(f"Tonalità rilevata: {key} {mode}".strip())
+        if d.get("bpm"):
+            meta.append(f"BPM: {d.get('bpm')}")
+        dur = d.get("duration") or self.engine.duration()
+        if dur:
+            meta.append(f"Durata: {_fmt_time(dur)}")
+        if meta:
+            lines.append("   ·   ".join(meta))
+        if semis:
+            played = self._transpose_key_name(key, semis)
+            played_txt = f"  →  suonata in {played}" if played else ""
+            lines.append(f"Trasposizione: {semis:+d} semitoni{played_txt} "
+                         "(gli accordi qui sotto sono già trasposti)")
+        lines.append(f"Notazione: {'Do Re Mi' if self._notation == 'latin' else 'C D E'}")
+        lines.append("─" * 46)
+        lines.append("")
+
+        labels = [self._chord_text(c, semis) for c in self._chords]
+        times = self._chord_times
+        secs = sorted(self._sections, key=lambda s: float(s.get("time", 0.0))) \
+            if self._sections else []
+        if secs:
+            bounds = [(str(s.get("label", "?")), float(s.get("time", 0.0)))
+                      for s in secs]
+            for i, (label, start) in enumerate(bounds):
+                end = bounds[i + 1][1] if i + 1 < len(bounds) else float("inf")
+                idxs = [j for j, t in enumerate(times) if start <= t < end]
+                if not idxs:
+                    continue
+                lines.append(f"[{label}]  ({_fmt_time(start)})")
+                lines += self._wrap_chords([labels[j] for j in idxs])
+                lines.append("")
+        else:
+            lines += self._wrap_chords(labels)
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _export_chord_sheet(self) -> None:
+        if not self._chords:
+            toast(self, "Nessun accordo da esportare: analizza prima il brano.", "warn")
+            return
+        base = os.path.basename(self._folder.rstrip("/\\")) or "brano"
+        semis = int(self.pitch_slider.value())
+        text = self._build_chord_sheet(base, semis)
+        default = os.path.join(self._folder or "", f"{base} - accordi.txt")
+        path, _sel = QFileDialog.getSaveFileName(
+            self, "Esporta foglio accordi", default, "Testo (*.txt)")
+        if not path:
+            return
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as exc:
+            toast(self, f"Scrittura del foglio fallita: {exc}", "error")
+            return
+        toast(self, f"Foglio accordi esportato in {path}", "ok")
+
+    def _start_export(self, jobs: list, sr: int, fmt: str, kind: str,
+                      strip_metadata: bool = False) -> None:
         self._ex_kind = kind
         self.export_btn.setEnabled(False)
         self.export_btn.setText("Esporto…")
         self._ex_thread = QThread()
-        self._ex_worker = ExportWorker(jobs, sr, fmt)
+        self._ex_worker = ExportWorker(jobs, sr, fmt, strip_metadata)
         self._ex_worker.moveToThread(self._ex_thread)
         self._ex_thread.started.connect(self._ex_worker.run)
         self._ex_worker.done.connect(self._on_export_done)

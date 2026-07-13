@@ -176,6 +176,14 @@ def _env() -> dict[str, str]:
         kept = [p for p in parts
                 if not os.path.normcase(os.path.abspath(p)).startswith(mp)]
         e["PATH"] = os.pathsep.join(kept)
+    # Assicura ffmpeg/ffprobe nel PATH del motore anche senza un download
+    # precedente: audio_separator (roformer) li invoca per leggere/convertire
+    # l'input e senza di essi fallisce con FileNotFoundError [WinError 2].
+    # Va fatto DOPO lo strip di _MEIPASS (in frozen bin/ sta lì dentro): bin/
+    # contiene solo eseguibili (ffmpeg/uv/rubberband), non DLL di Python 3.14.
+    bin_d = paths.bin_dir()
+    if (bin_d / "ffmpeg.exe").exists():
+        e["PATH"] = str(bin_d) + os.pathsep + e.get("PATH", "")
     e["TORCH_HOME"] = str(_torch_home())          # contiene i checkpoint dei modelli
     e["UV_PYTHON_INSTALL_DIR"] = str(engine_dir() / "python")
     e["PYTHONUTF8"] = "1"

@@ -12,6 +12,12 @@ import re
 
 # (versione, [novità]) — la più recente in cima.
 CHANGELOG: list[tuple[str, list[str]]] = [
+    ("1.11.1", [
+        "Corretto un errore che poteva impedire di separare in stem un file "
+        "audio caricato dal tuo computer: se non avevi prima scaricato o "
+        "ascoltato qualcosa nella stessa sessione, la separazione falliva con "
+        "«Impossibile trovare il file specificato». Ora funziona sempre.",
+    ]),
     ("1.11.0", [
         "Nuovo «Conteggio» nel Mixer (gruppo CLICK): premi Play e senti una "
         "battuta di click a tempo prima che parta il brano, così arrivi "

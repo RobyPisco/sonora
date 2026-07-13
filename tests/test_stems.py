@@ -361,3 +361,23 @@ def test_multipass_progress_passata_singola_inalterata():
     for p in (0.0, 40.0, 100.0):
         cb(p)
     assert seen == [0.0, 40.0, 100.0]
+
+
+# ---------------- ambiente subprocess (ffmpeg nel PATH) ----------------
+
+def test_env_prepends_bin_when_ffmpeg_present(monkeypatch, tmp_path):
+    """Il motore deve trovare ffmpeg/ffprobe anche senza un download precedente:
+    _env() mette bin/ in testa al PATH del child (regressione WinError 2)."""
+    (tmp_path / "ffmpeg.exe").write_bytes(b"")
+    monkeypatch.setattr(stems.paths, "bin_dir", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "C:\\altrove")
+    path = stems._env()["PATH"].split(os.pathsep)
+    assert path[0] == str(tmp_path)
+
+
+def test_env_no_bin_when_ffmpeg_absent(monkeypatch, tmp_path):
+    """bin/ senza ffmpeg (es. CI nuda) non va prependato al PATH."""
+    monkeypatch.setattr(stems.paths, "bin_dir", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "C:\\altrove")
+    path = stems._env()["PATH"].split(os.pathsep)
+    assert str(tmp_path) not in path
